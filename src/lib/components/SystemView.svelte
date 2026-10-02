@@ -18,7 +18,7 @@
   let scene = $state(null)
   let days = $state(startDays)
   let playing = $state(false)
-  let speed = $state(10)
+  let speed = $state(1)
 
   onMount(() => {
     scene = createSystemScene(container, galaxy, system, { onSelect: name => onSelectPlanet(name) })
