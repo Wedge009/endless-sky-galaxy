@@ -121,16 +121,26 @@ export function createGalaxyScene(container, galaxy, events) {
     return [from.add(unit), to.sub(unit)]
   }
 
-  const linkGeometry = new THREE.BufferGeometry()
+  /**
+   * A fresh geometry for a set of line segments. setFromPoints only refills
+   * an existing geometry's buffer, which is sized for its first set of
+   * points, so a geometry can't be reused once the number of lines changes.
+   * @param {THREE.LineSegments} lines @param {THREE.Vector3[]} points @param {number[]} colors
+   */
+  function setLines(lines, points, colors) {
+    lines.geometry.dispose()
+    lines.geometry = new THREE.BufferGeometry().setFromPoints(points)
+    lines.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+  }
+
   const linkMaterial = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false })
-  const links = new THREE.LineSegments(linkGeometry, linkMaterial)
+  const links = new THREE.LineSegments(new THREE.BufferGeometry(), linkMaterial)
   links.renderOrder = 2
   scene.add(links)
 
   // --- Wormholes, drawn with an arrowhead at the departure end as in game -----
-  const wormholeGeometry = new THREE.BufferGeometry()
   const wormholes = new THREE.LineSegments(
-    wormholeGeometry,
+    new THREE.BufferGeometry(),
     new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false }),
   )
   wormholes.renderOrder = 2
@@ -164,8 +174,7 @@ export function createGalaxyScene(container, galaxy, events) {
         wormholeColors.push(color, color)
       }
     }
-    wormholeGeometry.setFromPoints(wormholePositions)
-    wormholeGeometry.setAttribute('color', new THREE.Float32BufferAttribute(wormholeColors.flatMap(c => [c.r, c.g, c.b]), 3))
+    setLines(wormholes, wormholePositions, wormholeColors.flatMap(c => [c.r, c.g, c.b]))
   }
   rebuildWormholes()
 
@@ -248,8 +257,7 @@ export function createGalaxyScene(container, galaxy, events) {
       positions.push(...ends)
       colors.push(c, c, c, c, c, c)
     }
-    linkGeometry.setFromPoints(positions)
-    linkGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+    setLines(links, positions, colors)
   }
 
   // --- Camera -----------------------------------------------------------------
