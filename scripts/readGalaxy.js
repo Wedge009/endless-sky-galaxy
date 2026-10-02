@@ -9,7 +9,7 @@ import sharp from 'sharp'
 import { parseDataFile } from './dataFile.js'
 import { analyseEvents } from './events.js'
 import { choiceLabels } from './eventChoices.js'
-import { finishGalaxy, flatten, loadPlanet, loadSystem } from '../src/lib/data/universe.js'
+import { finishGalaxy, flatten, loadPlanet, loadShop, loadSystem } from '../src/lib/data/universe.js'
 import { applyEvents, eventsToApply } from '../src/lib/data/applyEvents.js'
 
 /** @typedef {import('./dataFile.js').DataNode} DataNode */
@@ -47,6 +47,12 @@ export async function readGalaxy(ES, { root, sprites }) {
   /** @type {Map<string, any>} */ const stars = new Map()
   /** @type {Map<string, number[]>} */ const colors = new Map()
   /** @type {{ name: string, low: number, high: number }[]} */ const commodities = []
+  /** @type {Map<string, any>} */ const outfitters = new Map()
+  /** @type {Map<string, any>} */ const shipyards = new Map()
+  /** @type {Map<string, string | null>} outfit -> category */ const outfitCategories = new Map()
+  /** @type {Map<string, string | null>} ship -> category; variants take their base's */ const shipCategories = new Map()
+  /** @type {[string, string][]} variant -> base ship */ const variants = []
+  /** @type {Record<string, string[]>} the order the game lists categories in (categories.txt) */ const categoryOrder = {}
   const duplicates = []
 
   /** @param {string[]} values @returns {number[] | null} */
@@ -89,6 +95,19 @@ export async function readGalaxy(ES, { root, sprites }) {
           else if (key === 'display name') w.displayName = values[0]
           else if (key === 'link') w.links.push([values[0], values[1]])
           else if (key === 'color') pendingColors.push(() => (w.color = colorOf(values)))
+        }
+      } else if (type === 'category' && (name === 'ship' || name === 'outfit')) categoryOrder[name] = node.children.map(c => c.tokens[0])
+      else if (type === 'outfitter' && name) loadShop(outfitters, node)
+      else if (type === 'shipyard' && name) loadShop(shipyards, node)
+      else if (type === 'outfit' && name) {
+        const category = node.children.find(c => c.tokens[0] === 'category')?.tokens[1]
+        if (category || !outfitCategories.has(name)) outfitCategories.set(name, category ?? null)
+      } else if (type === 'ship' && name) {
+        // A variant, `ship "Base" "Variant"`, is sold under its own name.
+        if (node.tokens[2]) variants.push([node.tokens[2], name])
+        else {
+          const category = node.children.find(c => c.tokens[0] === 'attributes')?.children.find(c => c.tokens[0] === 'category')?.tokens[1]
+          if (category || !shipCategories.has(name)) shipCategories.set(name, category ?? null)
         }
       } else if (type === 'star' && name) {
         const s = stars.get(name) ?? { sprite: name, icon: null, power: null, wind: null }
@@ -183,13 +202,13 @@ export async function readGalaxy(ES, { root, sprites }) {
 
   // ---------------------------------------------------------------------------
   // Events. Those that matter change a system as the map shows it, a link, a
-  // region label, or a planet; changes to fleets, shops' stock and the like
-  // don't show.
+  // region label, a planet or what a shop sells; changes to fleets and the
+  // like don't show.
 
   const MAP_KEYS = new Set(['pos', 'government', 'link', 'hidden', 'shrouded', 'inaccessible', 'object', 'attributes'])
   /** @param {DataNode} event */
   function isRelevant(event) {
-    return event.children.some(c => ['link', 'unlink', 'galaxy', 'planet'].includes(c.tokens[0])
+    return event.children.some(c => ['link', 'unlink', 'galaxy', 'planet', 'outfitter', 'shipyard'].includes(c.tokens[0])
       || (c.tokens[0] === 'system' && c.children.some(g => MAP_KEYS.has(g.tokens[g.tokens[0] === 'add' || g.tokens[0] === 'remove' ? 1 : 0]))))
   }
   const analysis = analyseEvents(allNodes, { isRelevant, labels: choiceLabels })
@@ -201,7 +220,7 @@ export async function readGalaxy(ES, { root, sprites }) {
     e.file = e.file && relative(join(ES, 'data'), e.file)
     // The changes the viewer applies (see applyChange in src/lib/data/universe.js).
     e.changes = (eventNodes.get(name)?.children ?? [])
-      .filter(c => ['system', 'planet', 'link', 'unlink'].includes(c.tokens[0]))
+      .filter(c => ['system', 'planet', 'link', 'unlink', 'outfitter', 'shipyard'].includes(c.tokens[0]))
       .map(bare)
   }
 
@@ -214,6 +233,14 @@ export async function readGalaxy(ES, { root, sprites }) {
     links: finished.links,
     planets: finished.planets,
     wormholes: [...wormholes.values()],
+    outfitters: Object.fromEntries(outfitters),
+    shipyards: Object.fromEntries(shipyards),
+    // What each item sold is, for grouping a shop's stock.
+    categories: {
+      outfits: Object.fromEntries(outfitCategories),
+      ships: Object.fromEntries([...shipCategories, ...variants.map(([variant, base]) => [variant, shipCategories.get(base) ?? null])]),
+      order: { outfits: categoryOrder.outfit ?? [], ships: categoryOrder.ship ?? [] },
+    },
     events: analysis.events,
     choices: analysis.choices,
   }
@@ -241,7 +268,8 @@ export async function readGalaxy(ES, { root, sprites }) {
     const planet = (/** @type {any} */ p) => JSON.stringify({
       ...p, description: null, spaceport: null, port: p.port && { ...p.port, description: null }, requiredReputation: null, bribe: null,
     })
-    return a.planets.some((/** @type {any} */ p, /** @type {number} */ i) => planet(p) !== planet(b.planets[i]))
+    if (a.planets.some((/** @type {any} */ p, /** @type {number} */ i) => planet(p) !== planet(b.planets[i]))) return true
+    return JSON.stringify([a.outfitters, a.shipyards]) !== JSON.stringify([b.outfitters, b.shipyards])
   }
   const settled = []
   for (const choice of [...galaxy.choices]) {

@@ -101,6 +101,19 @@ export function compareGalaxies(current, previous) {
       systems.set(name, { name, status: changes.every(c => c.reworded) ? 'reworded' : 'changed', changes })
   }
 
+  // Shops whose stock changed, which reach every planet that has them.
+  /** @type {{ kind: 'outfitter' | 'shipyard', name: string, added: string[], removed: string[] }[]} */
+  const shops = []
+  for (const [kind, now, then] of /** @type {const} */ ([['outfitter', current.outfitters, previous.outfitters], ['shipyard', current.shipyards, previous.shipyards]]))
+    for (const name of new Set([...Object.keys(now ?? {}), ...Object.keys(then ?? {})])) {
+      const a = then?.[name]?.items ?? []
+      const b = now?.[name]?.items ?? []
+      const added = b.filter((/** @type {string} */ i) => !a.includes(i))
+      const removed = a.filter((/** @type {string} */ i) => !b.includes(i))
+      if (added.length || removed.length) shops.push({ kind, name, added, removed })
+    }
+  shops.sort((x, y) => x.name.localeCompare(y.name))
+
   const counts = { added: 0, removed: 0, changed: 0, reworded: 0 }
   for (const c of systems.values()) counts[c.status]++
   return {
@@ -109,6 +122,7 @@ export function compareGalaxies(current, previous) {
     removedSystems: [...before.values()].filter(s => !after.has(s.name)),
     addedLinks,
     removedLinks,
-    counts: { ...counts, addedLinks: addedLinks.length, removedLinks: removedLinks.length },
+    shops,
+    counts: { ...counts, addedLinks: addedLinks.length, removedLinks: removedLinks.length, shops: shops.length },
   }
 }

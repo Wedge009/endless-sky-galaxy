@@ -6,6 +6,10 @@ the game's flat 2D map, laid out on a plane you can pan across, zoom into, tilt
 and turn. Click a system to see its government, stars, planets and their
 facilities, trade prices and links.
 
+A planet's outfitters and shipyards list what they sell, grouped as the game
+groups them. Click an item, or search for an outfit or ship, to see on the map
+everywhere it's sold.
+
 It reads the game's data straight from a check-out, so it can show any version
 of the game, including development branches. It isn't bound by the game's
 rules: hidden, shrouded and inaccessible systems are all shown, and can be

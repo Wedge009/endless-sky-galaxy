@@ -1,7 +1,8 @@
 <script>
+  import Stock from './Stock.svelte'
   import { css, governmentColor, starClass, valueColor, visibilityOf } from '../utils/colors.js'
 
-  let { galaxy, system, planets, change = null, compareVersion = null, onSelectSystem, onClose } = $props()
+  let { galaxy, system, planets, change = null, compareVersion = null, onSelectSystem, onFindItem, onClose } = $props()
 
   const governmentName = (/** @type {string | null} */ name) =>
     (name && galaxy.governments[name]?.displayName) ?? name ?? 'None'
@@ -151,11 +152,11 @@
               {/if}
               {#if planet.shipyards.length}
                 <dt>Shipyard</dt>
-                <dd>{planet.shipyards.join(', ')}</dd>
+                <dd><Stock {galaxy} kind="ship" shops={planet.shipyards} {onFindItem} /></dd>
               {/if}
               {#if planet.outfitters.length}
                 <dt>Outfitter</dt>
-                <dd>{planet.outfitters.join(', ')}</dd>
+                <dd><Stock {galaxy} kind="outfit" shops={planet.outfitters} {onFindItem} /></dd>
               {/if}
               {#if planet.port?.services.length}
                 <dt>Port</dt>

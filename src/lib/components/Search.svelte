@@ -1,6 +1,7 @@
 <script>
-  // Find a system by its name or the name of a planet in it.
-  let { galaxy, onSelectSystem } = $props()
+  // Find a system by its name or the name of a planet in it, or an outfit or
+  // ship to see where it's sold.
+  let { galaxy, onSelectSystem, onFindItem } = $props()
 
   const LIMIT = 12
 
@@ -13,7 +14,16 @@
     ...galaxy.planets
       .filter((/** @type {any} */ p) => p.system)
       .map((/** @type {any} */ p) => ({ label: p.displayName ?? p.name, system: p.system, kind: p.system })),
+    ...itemsSold('outfit', galaxy.outfitters),
+    ...itemsSold('ship', galaxy.shipyards),
   ])
+
+  /** Every item some planet's shop sells. @param {'outfit' | 'ship'} type @param {Record<string, any>} shops */
+  function itemsSold(type, shops) {
+    const listed = new Set(galaxy.planets.flatMap((/** @type {any} */ p) => (type === 'ship' ? p.shipyards : p.outfitters)))
+    const items = new Set([...listed].flatMap(shop => shops[shop]?.items ?? []))
+    return [...items].map(item => ({ label: item, system: null, item: type, kind: type === 'ship' ? 'ship for sale' : 'outfit for sale' }))
+  }
 
   let results = $derived.by(() => {
     const q = query.trim().toLowerCase()
@@ -24,9 +34,10 @@
       .slice(0, LIMIT)
   })
 
-  /** @param {{ system: string }} entry */
+  /** @param {{ system: string | null, item?: string, label: string }} entry */
   function choose(entry) {
-    onSelectSystem(entry.system)
+    if (entry.item) onFindItem(entry.item, entry.label)
+    else if (entry.system) onSelectSystem(entry.system)
     query = ''
     open = false
   }
@@ -47,7 +58,7 @@
 <div class="search">
   <input
     type="search"
-    placeholder="Find a system or planet"
+    placeholder="Find a system, planet, outfit or ship"
     bind:value={query}
     oninput={() => ((active = 0), (open = true))}
     onfocus={() => (open = true)}
@@ -60,7 +71,8 @@
         <li>
           <button class:active={i === active} onmousedown={() => choose(entry)}>
             {entry.label}
-            {#if entry.kind !== 'system'}<span class="where">in {entry.kind}</span>{/if}
+            {#if entry.item}<span class="where">{entry.kind}</span>
+            {:else if entry.kind !== 'system'}<span class="where">in {entry.kind}</span>{/if}
           </button>
         </li>
       {/each}
@@ -74,7 +86,7 @@
   }
 
   input {
-    width: 220px;
+    width: 270px;
   }
 
   ul {

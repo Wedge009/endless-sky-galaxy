@@ -67,6 +67,27 @@ export const EVENT_COLORS = {
   unchanged: [0.3, 0.3, 0.3],
 }
 
+export const SELLS_COLOR = [0.35, 0.85, 1]
+
+/**
+ * The systems with a planet that sells an item, for a mode like
+ * 'sells:outfit:Heavy Laser' or 'sells:ship:Shuttle'.
+ * @param {any} galaxy @param {string} mode
+ * @returns {Set<string>}
+ */
+export function systemsSelling(galaxy, mode) {
+  const [, kind, ...rest] = mode.split(':')
+  const item = rest.join(':')
+  const table = kind === 'ship' ? galaxy.shipyards : galaxy.outfitters
+  const sold = new Set()
+  for (const p of galaxy.planets) {
+    if (!p.system) continue
+    const shops = kind === 'ship' ? p.shipyards : p.outfitters
+    if (shops.some((/** @type {string} */ shop) => table[shop]?.items.includes(item))) sold.add(p.system)
+  }
+  return sold
+}
+
 /** For the changes since another version, systems and links alike. @type {Record<string, number[]>} */
 export const CHANGE_COLORS = {
   new: [0.35, 0.9, 0.4],
@@ -78,7 +99,7 @@ export const CHANGE_COLORS = {
 
 /**
  * @param {any} galaxy
- * @param {string} mode  'government' | 'stars' | 'visibility' | 'events' | 'changes' | 'commodity:<name>'
+ * @param {string} mode  'government' | 'stars' | 'visibility' | 'events' | 'changes' | 'commodity:<name>' | 'sells:<outfit|ship>:<name>'
  * @param {ReturnType<typeof import('../data/compareGalaxies.js').compareGalaxies> | null} [changes]
  *   what's changed since another version, for the 'changes' mode
  * @returns {number[][]}
@@ -95,6 +116,10 @@ export function systemColors(galaxy, mode, changes = null) {
   }
   if (mode === 'stars')
     return galaxy.systems.map((/** @type {any} */ s) => STAR_CLASS_COLORS[starClass(s.stars[0])])
+  if (mode.startsWith('sells:')) {
+    const sold = systemsSelling(galaxy, mode)
+    return galaxy.systems.map((/** @type {any} */ s) => (sold.has(s.name) ? SELLS_COLOR : EVENT_COLORS.unchanged))
+  }
   if (mode === 'changes')
     return galaxy.systems.map((/** @type {any} */ s) => {
       const status = changes?.systems.get(s.name)?.status

@@ -98,6 +98,11 @@
     map?.select(name, fly)
   }
 
+  /** Colour the map by where an outfit or ship is sold. @param {'outfit' | 'ship'} kind @param {string} item */
+  function findItem(kind, item) {
+    settings.mode = `sells:${kind}:${item}`
+  }
+
   /** @param {KeyboardEvent} e */
   function onKeydown(e) {
     // Leave the keys to a field that has them, such as the search box.
@@ -139,7 +144,7 @@
       </span>
     </div>
 
-    <Search {galaxy} onSelectSystem={(/** @type {string} */ name) => select(name, true)} />
+    <Search {galaxy} onSelectSystem={(/** @type {string} */ name) => select(name, true)} onFindItem={findItem} />
 
     <select bind:value={settings.mode} aria-label="Colour systems by">
       <option value="government">Government</option>
@@ -147,6 +152,9 @@
       <option value="visibility">Map visibility</option>
       <option value="events" disabled={!settings.storyEvents}>Changed by story events</option>
       {#if compareBase}<option value="changes">Changed since {compareBase.source.describe}</option>{/if}
+      {#if settings.mode.startsWith('sells:')}
+        <option value={settings.mode}>Where to buy {settings.mode.split(':').slice(2).join(':')}</option>
+      {/if}
       <optgroup label="Commodity price">
         {#each galaxy.commodities as c (c.name)}
           <option value="commodity:{c.name}">{c.name}</option>
@@ -200,6 +208,7 @@
         planets={planetsByName}
         change={changes?.systems.get(selected)}
         compareVersion={previous?.source.describe}
+        onFindItem={findItem}
         onSelectSystem={(/** @type {string} */ name) => select(name, true)}
         onClose={() => select(null, false)}
       />

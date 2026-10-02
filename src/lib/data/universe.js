@@ -191,6 +191,46 @@ export function loadPlanet(planets, node) {
 }
 
 
+/**
+ * Load an outfitter or shipyard, or amend the one already there, as
+ * Shop<Item>::Load does. Stock is a set of items: a plain item or "add" puts
+ * one in, "remove" takes one out, and "clear" (or "remove" alone) empties it.
+ * A "stock" block given again without "add" replaces the stock.
+ *
+ * Shops with a location filter or conditions to sell aren't attached to
+ * planets but offered wherever they match (the ammunition restocks), so
+ * they're marked and left out of planets' stock.
+ * @param {Map<string, any>} shops
+ * @param {DataNode} node
+ */
+export function loadShop(shops, node) {
+  const name = node.tokens[1]
+  const shop = shops.get(name) ?? { name, items: [], anywhere: false }
+  shops.set(name, shop)
+  let overwriteStock = shop.items.length > 0
+  /** @param {DataNode} child */
+  const single = child => {
+    const [token, value] = child.tokens
+    if ((token === 'clear' || token === 'remove') && value === undefined) shop.items = []
+    else if (token === 'clear' || token === 'remove') shop.items = shop.items.filter((/** @type {string} */ i) => i !== value)
+    else if (token === 'add' && value !== undefined) shop.items = [...new Set([...shop.items, value])]
+    else shop.items = [...new Set([...shop.items, token])]
+  }
+  for (const child of node.children) {
+    const mode = child.tokens[0] === 'add' || child.tokens[0] === 'remove' ? child.tokens[0] : ''
+    const key = child.tokens[mode ? 1 : 0]
+    if (key === 'location' || (key === 'to' && child.tokens[mode ? 2 : 1] === 'sell')) shop.anywhere = mode !== 'remove'
+    else if (key === 'stock') {
+      if (mode !== 'add' && overwriteStock) {
+        overwriteStock = false
+        shop.items = []
+      }
+      if (mode === 'remove') shop.items = []
+      else child.children.forEach(single)
+    } else single(child)
+  }
+}
+
 /** Every stellar object, depth first. @param {any[]} objects @returns {any[]} */
 export const flatten = objects => objects.flatMap(o => [o, ...flatten(o.children)])
 
@@ -207,13 +247,15 @@ export function isInhabited(p) {
 /**
  * Apply one change from an event, as UniverseObjects::Change does. Only the
  * kinds the viewer shows are handled; region labels are shown regardless.
- * @param {{ systems: Map<string, any>, planets: Map<string, any> }} universe
+ * @param {{ systems: Map<string, any>, planets: Map<string, any>, outfitters: Map<string, any>, shipyards: Map<string, any> }} universe
  * @param {DataNode} node
  */
-export function applyChange({ systems, planets }, node) {
+export function applyChange({ systems, planets, outfitters, shipyards }, node) {
   const [key, a, b] = node.tokens
   if (key === 'system' && a) loadSystem(systems, node)
   else if (key === 'planet' && a) loadPlanet(planets, node)
+  else if (key === 'outfitter' && a) loadShop(outfitters, node)
+  else if (key === 'shipyard' && a) loadShop(shipyards, node)
   // System::Link and System::Unlink change both ends.
   else if ((key === 'link' || key === 'unlink') && systems.has(a) && systems.has(b)) {
     const [from, to] = [systems.get(a), systems.get(b)]

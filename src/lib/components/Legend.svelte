@@ -1,5 +1,5 @@
 <script>
-  import { css, CHANGE_COLORS, EVENT_COLORS, governmentColor, STAR_CLASS_COLORS, valueColor, VISIBILITY_COLORS } from '../utils/colors.js'
+  import { css, CHANGE_COLORS, EVENT_COLORS, governmentColor, SELLS_COLOR, systemsSelling, STAR_CLASS_COLORS, valueColor, VISIBILITY_COLORS } from '../utils/colors.js'
 
   // `center` is the map position the view is centred on; in government mode,
   // the legend lists the governments nearest it, as the game's map key does.
@@ -44,6 +44,11 @@
     {#each Object.entries(VISIBILITY_COLORS) as [name, color]}
       <div class="row"><span class="ring" style:color={css(color)}></span>{name}</div>
     {/each}
+  {:else if mode.startsWith('sells:')}
+    {@const count = systemsSelling(galaxy, mode).size}
+    <div class="row title">{mode.split(':').slice(2).join(':')}</div>
+    <div class="row"><span class="ring" style:color={css(SELLS_COLOR)}></span>Sold here ({count} {count === 1 ? 'system' : 'systems'})</div>
+    <div class="row"><span class="ring" style:color={css(EVENT_COLORS.unchanged)}></span>Not sold</div>
   {:else if mode === 'changes'}
     <div class="row title">Since {compareVersion}</div>
     {#each Object.entries(CHANGE_COLORS) as [name, color]}

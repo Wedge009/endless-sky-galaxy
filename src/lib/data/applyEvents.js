@@ -32,19 +32,24 @@ export function eventsToApply(galaxy, picks) {
 export function applyEvents(galaxy, names) {
   const systems = new Map(galaxy.systems.map((/** @type {any} */ { stars, ...s }) => [s.name, structuredClone(s)]))
   const planets = new Map(galaxy.planets.map((/** @type {any} */ { system, inhabited, ...p }) => [p.name, structuredClone(p)]))
+  const outfitters = new Map(Object.entries(structuredClone(galaxy.outfitters ?? {})))
+  const shipyards = new Map(Object.entries(structuredClone(galaxy.shipyards ?? {})))
   /** @type {Map<string, Set<string>>} */
   const changedBy = new Map()
   /** @type {Map<string, Set<string>>} planet -> events, resolved to systems at the end */
   const planetChanges = new Map()
+  /** @type {Map<string, Set<string>>} shop -> events, resolved to planets and their systems at the end */
+  const shopChanges = new Map()
   /** @param {Map<string, Set<string>>} map @param {string} key @param {string} event */
   const note = (map, key, event) => map.set(key, (map.get(key) ?? new Set()).add(event))
 
   for (const name of names)
     for (const change of galaxy.events[name].changes) {
-      applyChange({ systems, planets }, change)
+      applyChange({ systems, planets, outfitters, shipyards }, change)
       const [kind, a, b] = change.tokens
       if (kind === 'system') note(changedBy, a, name)
       else if (kind === 'planet') note(planetChanges, a, name)
+      else if (kind === 'outfitter' || kind === 'shipyard') note(shopChanges, `${kind}\u0000${a}`, name)
       else {
         note(changedBy, a, name)
         note(changedBy, b, name)
@@ -52,7 +57,16 @@ export function applyEvents(galaxy, names) {
     }
 
   const finished = finishGalaxy(systems.values(), planets.values())
-  for (const p of finished.planets)
-    for (const event of planetChanges.get(p.name) ?? []) if (p.system) note(changedBy, p.system, event)
-  return { ...galaxy, ...finished, changedBy }
+  for (const p of finished.planets) {
+    if (!p.system) continue
+    for (const event of planetChanges.get(p.name) ?? []) note(changedBy, p.system, event)
+    for (const [kind, shops] of [['outfitter', p.outfitters], ['shipyard', p.shipyards]])
+      for (const shop of shops)
+        for (const event of shopChanges.get(`${kind}\u0000${shop}`) ?? []) note(changedBy, p.system, event)
+  }
+  return {
+    ...galaxy, ...finished, changedBy,
+    outfitters: Object.fromEntries(outfitters),
+    shipyards: Object.fromEntries(shipyards),
+  }
 }

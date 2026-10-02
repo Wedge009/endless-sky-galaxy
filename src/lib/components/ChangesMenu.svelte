@@ -17,7 +17,7 @@
     { title: 'Descriptions rewritten only', status: 'reworded', list: systemsWith('reworded') },
   ])
   let { counts } = $derived(changes)
-  let nothing = $derived(!counts.added && !counts.removed && !counts.changed && !counts.reworded && !counts.addedLinks && !counts.removedLinks)
+  let nothing = $derived(!counts.added && !counts.removed && !counts.changed && !counts.reworded && !counts.addedLinks && !counts.removedLinks && !counts.shops)
 
   /** A few words on what changed in a system. @param {any} c */
   const gist = c => {
@@ -36,7 +36,8 @@
         <p class="summary">
           {counts.added} new, {counts.removed} removed and {counts.changed} changed systems
           (and {counts.reworded} with only descriptions rewritten);
-          {counts.addedLinks} links added and {counts.removedLinks} removed.
+          {counts.addedLinks} links added and {counts.removedLinks} removed;
+          {counts.shops} {counts.shops === 1 ? 'shop' : 'shops'} with different stock.
         </p>
         <button onclick={() => { onShow(); open = false }}>Colour the map by changes</button>
         {#each groups as group (group.status)}
@@ -56,6 +57,16 @@
             </ul>
           {/if}
         {/each}
+        {#if changes.shops.length}
+          <h3>Shop stock <span class="muted">({changes.shops.length})</span></h3>
+          <ul>
+            {#each changes.shops as shop (shop.kind + shop.name)}
+              <li title={[...shop.added.map((/** @type {string} */ i) => `+ ${i}`), ...shop.removed.map((/** @type {string} */ i) => `− ${i}`)].join('\n')}>
+                {shop.name} <span class="muted">· {shop.kind}{shop.added.length ? `, +${shop.added.length}` : ''}{shop.removed.length ? `, −${shop.removed.length}` : ''}</span>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       {/if}
     </div>
   {/if}
