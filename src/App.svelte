@@ -3,16 +3,18 @@
   import Legend from './lib/components/Legend.svelte'
   import Search from './lib/components/Search.svelte'
   import SystemPanel from './lib/components/SystemPanel.svelte'
+  import StoryMenu from './lib/components/StoryMenu.svelte'
+  import { applyEvents, eventsToApply } from './lib/data/applyEvents.js'
   import { systemColors } from './lib/utils/colors.js'
   import { load, save } from './lib/utils/persisted.js'
 
-  /** @type {any} */
-  let galaxy = $state(null)
+  /** The galaxy as extracted: its base state, before any story event. @type {any} */
+  let base = $state.raw(null)
   let error = $state('')
 
   fetch('data/galaxy.json')
     .then(r => (r.ok ? r.json() : Promise.reject(new Error(`${r.status} ${r.statusText}`))))
-    .then(data => (galaxy = data))
+    .then(data => (base = data))
     .catch(e => (error = String(e.message ?? e)))
 
   let settings = $state(
@@ -24,6 +26,9 @@
       eventRegions: true,
       backdrop: true,
       wormholes: true,
+      storyEvents: true,
+      /** @type {Record<string, string>} choice key -> chosen option */
+      choices: {},
     }),
   )
   $effect(() => save('settings', $state.snapshot(settings)))
@@ -37,7 +42,13 @@
     wormholes: settings.wormholes,
   })
 
-  let colors = $derived(galaxy ? systemColors(galaxy, settings.mode) : [])
+  let applied = $derived(base && settings.storyEvents ? eventsToApply(base, settings.choices) : [])
+  /** The galaxy shown: the base state, or after the story's events. @type {any} */
+  let galaxy = $derived(base && (settings.storyEvents ? applyEvents(base, applied) : base))
+
+  // Without events nothing is changed by them, so fall back to governments.
+  let mode = $derived(settings.mode === 'events' && !settings.storyEvents ? 'government' : settings.mode)
+  let colors = $derived(galaxy ? systemColors(galaxy, mode) : [])
   let systemsByName = $derived(galaxy ? new Map(galaxy.systems.map((/** @type {any} */ s) => [s.name, s])) : new Map())
   let planetsByName = $derived(galaxy ? new Map(galaxy.planets.map((/** @type {any} */ p) => [p.name, p])) : new Map())
 
@@ -99,12 +110,15 @@
       <option value="government">Government</option>
       <option value="stars">Star class</option>
       <option value="visibility">Map visibility</option>
+      <option value="events" disabled={!settings.storyEvents}>Changed by story events</option>
       <optgroup label="Commodity price">
         {#each galaxy.commodities as c (c.name)}
           <option value="commodity:{c.name}">{c.name}</option>
         {/each}
       </optgroup>
     </select>
+
+    <StoryMenu {galaxy} bind:enabled={settings.storyEvents} bind:choices={settings.choices} appliedCount={applied.length} />
 
     <div class="settings">
       <button onclick={() => (showSettings = !showSettings)} aria-expanded={showSettings}>View ▾</button>
@@ -124,7 +138,7 @@
     </div>
   </div>
 
-  <Legend {galaxy} mode={settings.mode} {center} />
+  <Legend {galaxy} {mode} {center} />
 
   {#if hoveredSystem && hoveredSystem.name !== selected}
     <div class="panel hover">

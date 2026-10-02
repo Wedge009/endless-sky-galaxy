@@ -61,9 +61,15 @@ export function visibilityOf(s) {
   return s.shrouded ? 'shrouded' : 'mapped'
 }
 
+/** @type {Record<string, number[]>} */
+export const EVENT_COLORS = {
+  'changed by story events': [1, 0.72, 0.25],
+  unchanged: [0.3, 0.3, 0.3],
+}
+
 /**
  * @param {any} galaxy
- * @param {string} mode  'government' | 'stars' | 'visibility' | 'commodity:<name>'
+ * @param {string} mode  'government' | 'stars' | 'visibility' | 'events' | 'commodity:<name>'
  * @returns {number[][]}
  */
 export function systemColors(galaxy, mode) {
@@ -78,6 +84,8 @@ export function systemColors(galaxy, mode) {
   }
   if (mode === 'stars')
     return galaxy.systems.map((/** @type {any} */ s) => STAR_CLASS_COLORS[starClass(s.stars[0])])
+  if (mode === 'events')
+    return galaxy.systems.map((/** @type {any} */ s) => EVENT_COLORS[galaxy.changedBy?.has(s.name) ? 'changed by story events' : 'unchanged'])
   if (mode === 'visibility')
     return galaxy.systems.map((/** @type {any} */ s) => VISIBILITY_COLORS[visibilityOf(s)])
   return galaxy.systems.map((/** @type {any} */ s) => governmentColor(galaxy, s.government))

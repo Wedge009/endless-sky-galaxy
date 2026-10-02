@@ -20,6 +20,8 @@
     return () => scene?.dispose()
   })
 
+  // Before the colours, which are per system of the galaxy given here.
+  $effect(() => scene?.setGalaxy(galaxy))
   $effect(() => scene?.setColors(colors))
   $effect(() => scene?.setOptions({ ...options }))
 </script>

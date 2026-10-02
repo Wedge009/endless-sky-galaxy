@@ -27,6 +27,7 @@ import { parseDataFile } from './dataFile.js'
 import { fetchRef, UPSTREAM } from './fetchRef.js'
 import { analyseEvents } from './events.js'
 import { choiceLabels } from './eventChoices.js'
+import { finishGalaxy, loadPlanet, loadSystem } from '../src/lib/data/universe.js'
 
 /** @typedef {import('./dataFile.js').DataNode} DataNode */
 
@@ -83,9 +84,9 @@ function git(command) {
 const num = (/** @type {string} */ s) => Number.parseFloat(s)
 
 // ---------------------------------------------------------------------------
-// Load every top-level definition the map needs. As in the game, a second
-// definition of the same object amends the first: a key given without "add"
-// replaces that key's earlier values, "add" appends and "remove" deletes.
+// Load every top-level definition the map needs. Systems and planets are
+// loaded by src/lib/data/universe.js, which the viewer shares for applying
+// events.
 
 /** @type {Map<string, any>} */ const systems = new Map()
 /** @type {Map<string, any>} */ const planets = new Map()
@@ -96,169 +97,6 @@ const num = (/** @type {string} */ s) => Number.parseFloat(s)
 /** @type {Map<string, number[]>} */ const colors = new Map()
 /** @type {{ name: string, low: number, high: number }[]} */ const commodities = []
 const duplicates = []
-
-/**
- * Walk a node's children, splitting off any "add"/"remove" prefix and
- * clearing a key's previous values on its first plain occurrence.
- * @param {DataNode} node
- * @param {any} target
- * @param {Record<string, () => void>} clear  key -> how to clear it
- * @param {(key: string, values: string[], child: DataNode, mode: '' | 'add' | 'remove') => void} handle
- */
-function loadChildren(node, target, clear, handle) {
-  const cleared = new Set()
-  for (const child of node.children) {
-    const mode = child.tokens[0] === 'add' || child.tokens[0] === 'remove' ? child.tokens[0] : ''
-    const key = child.tokens[mode ? 1 : 0]
-    const values = child.tokens.slice(mode ? 2 : 1)
-    if (key === undefined) continue
-    if (clear[key] && ((mode === 'remove' && !values.length) || (!mode && !cleared.has(key)))) {
-      clear[key]()
-      cleared.add(key)
-      if (mode === 'remove') continue
-    }
-    handle(key, values, child, mode)
-  }
-}
-
-/** @param {DataNode} node @returns {any} */
-function loadObject(node) {
-  const object = { name: node.tokens[1] ?? null, sprite: null, distance: 0, period: 0, children: [] }
-  for (const child of node.children) {
-    const [key, value] = child.tokens
-    if (key === 'sprite') object.sprite = value
-    else if (key === 'distance') object.distance = num(value)
-    else if (key === 'period') object.period = num(value)
-    else if (key === 'object') object.children.push(loadObject(child))
-  }
-  return object
-}
-
-/** @param {DataNode} node */
-function loadSystem(node) {
-  const name = node.tokens[1]
-  if (systems.has(name)) duplicates.push(`system ${name}`)
-  const s = systems.get(name) ?? {
-    name, displayName: null, pos: [0, 0], government: null, attributes: [], links: [],
-    hidden: false, shrouded: false, inaccessible: false,
-    jumpRange: null, belt: [], haze: null, objects: [], trade: {}, fleets: [], minables: [], hazards: [],
-  }
-  systems.set(name, s)
-  loadChildren(node, s, {
-    'display name': () => (s.displayName = null),
-    government: () => (s.government = null),
-    attributes: () => (s.attributes = []),
-    link: () => (s.links = []),
-    trade: () => (s.trade = {}),
-    fleet: () => (s.fleets = []),
-    minables: () => (s.minables = []),
-    hazard: () => (s.hazards = []),
-    belt: () => (s.belt = []),
-    object: () => (s.objects = []),
-    hidden: () => (s.hidden = false),
-    shrouded: () => (s.shrouded = false),
-    inaccessible: () => (s.inaccessible = false),
-  }, (key, values, child, mode) => {
-    const remove = mode === 'remove'
-    const without = (/** @type {any[]} */ list, /** @type {(x: any) => boolean} */ match) => list.filter(x => !match(x))
-    switch (key) {
-      case 'display name': s.displayName = values[0]; break
-      case 'pos': s.pos = [num(values[0]), num(values[1])]; break
-      case 'government': s.government = values[0]; break
-      case 'hidden': case 'shrouded': case 'inaccessible': s[key] = !remove; break
-      case 'jump range': s.jumpRange = num(values[0]); break
-      case 'haze': s.haze = values[0]; break
-      case 'belt': s.belt.push(num(values[0])); break
-      case 'attributes':
-        s.attributes = remove ? s.attributes.filter((/** @type {string} */ a) => !values.includes(a))
-          : [...new Set([...s.attributes, ...values])]
-        break
-      case 'link':
-        s.links = remove ? s.links.filter((/** @type {string} */ l) => l !== values[0]) : [...new Set([...s.links, values[0]])]
-        break
-      case 'trade':
-        if (remove) delete s.trade[values[0]]
-        else s.trade[values[0]] = num(values[1])
-        break
-      case 'fleet':
-        s.fleets = remove ? without(s.fleets, f => f.name === values[0])
-          : [...s.fleets, { name: values[0], period: num(values[1]) }]
-        break
-      case 'minables':
-        s.minables = remove ? without(s.minables, m => m.name === values[0])
-          : [...s.minables, { name: values[0], count: num(values[1]), energy: num(values[2]) }]
-        break
-      case 'hazard':
-        s.hazards = remove ? without(s.hazards, h => h.name === values[0])
-          : [...s.hazards, { name: values[0], period: num(values[1]) }]
-        break
-      case 'object':
-        if (remove) s.objects = without(s.objects, o => o.name === values[0])
-        else s.objects.push(loadObject(child))
-        break
-    }
-  })
-}
-
-/** @param {DataNode} node */
-function loadPlanet(node) {
-  const name = node.tokens[1]
-  if (planets.has(name)) duplicates.push(`planet ${name}`)
-  const p = planets.get(name) ?? {
-    name, displayName: null, attributes: [], landscape: null, government: null,
-    description: [], spaceport: [], port: null, shipyards: [], outfitters: [],
-    security: null, bribe: null, tribute: null, requiredReputation: null, wormhole: null,
-  }
-  planets.set(name, p)
-  /** @param {DataNode} child */
-  const paragraph = child => ({ text: child.tokens.at(-1), conditional: child.children.some(c => c.tokens[0] === 'to') })
-  loadChildren(node, p, {
-    attributes: () => (p.attributes = []),
-    description: () => (p.description = []),
-    spaceport: () => (p.spaceport = []),
-    port: () => (p.port = null),
-    shipyard: () => (p.shipyards = []),
-    outfitter: () => (p.outfitters = []),
-    tribute: () => (p.tribute = null),
-  }, (key, values, child, mode) => {
-    const remove = mode === 'remove'
-    switch (key) {
-      case 'display name': p.displayName = values[0]; break
-      case 'landscape': p.landscape = values[0]; break
-      case 'government': p.government = values[0]; break
-      case 'security': p.security = num(values[0]); break
-      case 'bribe': p.bribe = num(values[0]); break
-      case 'required reputation': p.requiredReputation = num(values[0]); break
-      case 'wormhole': p.wormhole = values[0]; break
-      case 'description': p.description.push(paragraph(child)); break
-      case 'spaceport': p.spaceport.push(paragraph(child)); break
-      case 'attributes':
-        p.attributes = remove ? p.attributes.filter((/** @type {string} */ a) => !values.includes(a))
-          : [...new Set([...p.attributes, ...values])]
-        break
-      case 'shipyard':
-        p.shipyards = remove ? p.shipyards.filter((/** @type {string} */ v) => v !== values[0]) : [...p.shipyards, values[0]]
-        break
-      case 'outfitter':
-        p.outfitters = remove ? p.outfitters.filter((/** @type {string} */ v) => v !== values[0]) : [...p.outfitters, values[0]]
-        break
-      case 'tribute': {
-        const fleet = child.children.find(c => c.tokens[0] === 'fleet')
-        p.tribute = { value: num(values[0]), fleet: fleet ? { name: fleet.tokens[1], count: num(fleet.tokens[2] ?? '1') } : null }
-        break
-      }
-      case 'port': {
-        p.port = { name: values[0] ?? null, recharges: [], services: [], description: [] }
-        for (const c of child.children) {
-          if (c.tokens[0] === 'recharges') p.port.recharges.push(...c.tokens.slice(1))
-          else if (c.tokens[0] === 'services') p.port.services.push(...c.tokens.slice(1))
-          else if (c.tokens[0] === 'description') p.port.description.push(paragraph(c))
-        }
-        break
-      }
-    }
-  })
-}
 
 /** @param {string[]} values @returns {number[] | null} */
 function colorOf(values) {
@@ -274,8 +112,8 @@ for (const file of files) {
   for (const node of parseDataFile(file)) {
     allNodes.push(node)
     const [type, name] = node.tokens
-    if (type === 'system' && name) loadSystem(node)
-    else if (type === 'planet' && name) loadPlanet(node)
+    if (type === 'system' && name) loadSystem(systems, node) && duplicates.push(`system ${name}`)
+    else if (type === 'planet' && name) loadPlanet(planets, node) && duplicates.push(`planet ${name}`)
     else if (type === 'color' && name && node.tokens.length >= 5) colors.set(name, node.tokens.slice(2, 5).map(num))
     else if (type === 'government' && name) {
       const g = governments.get(name) ?? { name, displayName: null, color: null }
@@ -372,20 +210,6 @@ async function exportSprite(name) {
 // ---------------------------------------------------------------------------
 // Assemble the output.
 
-/** Every stellar object, depth first. @param {any[]} objects @returns {any[]} */
-const flatten = objects => objects.flatMap(o => [o, ...flatten(o.children)])
-
-const planetSystem = new Map()
-for (const s of systems.values())
-  for (const o of flatten(s.objects))
-    if (o.name) planetSystem.set(o.name, s.name)
-
-/** @param {any} p */
-function isInhabited(p) {
-  const hasServices = p.spaceport.length || p.port || p.shipyards.length || p.outfitters.length
-  return Boolean((hasServices || p.requiredReputation || p.tribute?.fleet) && !p.attributes.includes('uninhabited'))
-}
-
 mkdirSync(OUT_DATA, { recursive: true })
 
 const outGalaxies = []
@@ -406,13 +230,7 @@ const outStars = {}
 for (const s of stars.values())
   outStars[s.sprite] = { icon: await exportSprite(s.icon), power: s.power, wind: s.wind }
 
-const links = new Map()
-for (const s of systems.values())
-  for (const other of s.links)
-    if (systems.has(other)) {
-      const key = [s.name, other].sort().join('\u0000')
-      links.set(key, [s.name, other].sort())
-    }
+const finished = finishGalaxy(systems.values(), planets.values())
 
 // ---------------------------------------------------------------------------
 // Events. Those that matter change a system as the map shows it, a link, a
@@ -432,7 +250,17 @@ function isSignificant(event) {
     || c.children.some(g => !TEXT.has(g.tokens[g.tokens[0] === 'add' || g.tokens[0] === 'remove' ? 1 : 0])))
 }
 const analysis = analyseEvents(allNodes, { isRelevant, isSignificant, labels: choiceLabels })
-for (const e of Object.values(analysis.events)) e.file = e.file && relative(join(ES, 'data'), e.file)
+
+/** A data node without its source position, as the viewer applies it. @param {DataNode} node @returns {any} */
+const bare = node => ({ tokens: node.tokens, children: node.children.map(bare) })
+const eventNodes = new Map(allNodes.filter(n => n.tokens[0] === 'event').map(n => [n.tokens[1], n]))
+for (const [name, e] of Object.entries(analysis.events)) {
+  e.file = e.file && relative(join(ES, 'data'), e.file)
+  // The changes the viewer applies (see applyChange in src/lib/data/universe.js).
+  e.changes = (eventNodes.get(name)?.children ?? [])
+    .filter(c => ['system', 'planet', 'link', 'unlink'].includes(c.tokens[0]))
+    .map(bare)
+}
 
 const commit = git('rev-parse --short HEAD')
 const galaxy = {
@@ -450,9 +278,9 @@ const galaxy = {
   governments: Object.fromEntries([...governments.values()].map(g => [g.name, { displayName: g.displayName, color: g.color }])),
   commodities,
   stars: outStars,
-  systems: [...systems.values()].map(s => ({ ...s, stars: flatten(s.objects).map(o => o.sprite).filter(sp => sp?.startsWith('star/')) })),
-  links: [...links.values()],
-  planets: [...planets.values()].map(p => ({ ...p, system: planetSystem.get(p.name) ?? null, inhabited: isInhabited(p) })),
+  systems: finished.systems,
+  links: finished.links,
+  planets: finished.planets,
   wormholes: [...wormholes.values()],
   events: analysis.events,
   choices: analysis.choices,

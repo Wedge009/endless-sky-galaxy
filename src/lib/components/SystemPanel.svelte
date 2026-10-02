@@ -34,6 +34,18 @@
       }),
   )
   let visibility = $derived(visibilityOf(system))
+  /** The story events that changed this system or its planets, in the order applied. */
+  let storyEvents = $derived(
+    [...(galaxy.changedBy?.get(system.name) ?? [])]
+      .map(name => ({ name, event: galaxy.events[name] }))
+      .sort((a, b) => a.event.order - b.event.order),
+  )
+  /** The choice and option an event hangs on, for display. @param {any} event */
+  const choiceText = event => event.choices.map((/** @type {any} */ c) => {
+    const choice = galaxy.choices.find((/** @type {any} */ x) => x.key === c.choice)
+    const option = choice?.options.find((/** @type {any} */ o) => o.id === c.option)
+    return `${choice?.label ?? c.choice}: ${option?.label ?? c.option}`
+  }).join('; ')
 
   /** @param {any[]} objects @returns {number} */
   function countAll(objects) {
@@ -206,6 +218,21 @@
       {/if}
     </section>
 
+    {#if storyEvents.length}
+      <section>
+        <h3>Story events</h3>
+        <ul class="events">
+          {#each storyEvents as { name, event } (name)}
+            <li title={event.triggers.map((/** @type {any} */ t) => `${t.mission} (on ${t.phase})`).join('\n')}>
+              {name}
+              {#if event.date}<span class="muted">· {event.date}</span>{/if}
+              {#if event.choices.length}<span class="muted">· {choiceText(event)}</span>{/if}
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+
     {#if system.fleets.length || system.minables.length || system.hazards.length}
       <section>
         <details>
@@ -231,6 +258,15 @@
 </aside>
 
 <style>
+  .events {
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  .events li {
+    margin: 2px 0;
+  }
+
   .system-panel {
     position: absolute;
     top: 56px;

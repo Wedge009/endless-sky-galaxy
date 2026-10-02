@@ -1,5 +1,5 @@
 <script>
-  import { css, governmentColor, STAR_CLASS_COLORS, valueColor, VISIBILITY_COLORS } from '../utils/colors.js'
+  import { css, EVENT_COLORS, governmentColor, STAR_CLASS_COLORS, valueColor, VISIBILITY_COLORS } from '../utils/colors.js'
 
   // `center` is the map position the view is centred on; in government mode,
   // the legend lists the governments nearest it, as the game's map key does.
@@ -43,6 +43,10 @@
   {:else if mode === 'visibility'}
     {#each Object.entries(VISIBILITY_COLORS) as [name, color]}
       <div class="row"><span class="ring" style:color={css(color)}></span>{name}</div>
+    {/each}
+  {:else if mode === 'events'}
+    {#each Object.entries(EVENT_COLORS) as [name, color]}
+      <div class="row"><span class="ring" style:color={css(color)}></span>{name[0].toUpperCase() + name.slice(1)}</div>
     {/each}
   {:else if commodity}
     <div class="row title">{commodity.name}</div>

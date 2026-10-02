@@ -80,7 +80,9 @@ export function createGalaxyScene(container, galaxy, events) {
   controls.maxDistance = 9000
   controls.maxPolarAngle = THREE.MathUtils.degToRad(82)
 
-  const systems = galaxy.systems
+  // Replaced by setGalaxy when story events are applied or changed. Events
+  // move and alter systems but don't add any, so the index stays valid.
+  let systems = galaxy.systems
   const index = new Map(systems.map((/** @type {any} */ s, /** @type {number} */ i) => [s.name, i]))
 
   // --- Galaxy backdrop and region labels ----------------------------------
@@ -126,41 +128,46 @@ export function createGalaxyScene(container, galaxy, events) {
   scene.add(links)
 
   // --- Wormholes, drawn with an arrowhead at the departure end as in game -----
-  const wormholePositions = []
-  const wormholeColors = []
-  for (const w of galaxy.wormholes) {
-    const color = new THREE.Color(...(w.color ?? [0.5, 0.2, 0.9]))
-    if (!w.mappable) color.multiplyScalar(0.5)
-    for (const [fromName, toName] of w.links) {
-      const a = systems[index.get(fromName)]
-      const b = systems[index.get(toName)]
-      if (!a || !b) continue
-      const ends = trimmed(a.pos, b.pos, 0.2)
-      if (!ends) continue
-      const [from, to] = ends
-      const dim = color.clone().multiplyScalar(0.45)
-      wormholePositions.push(from, to)
-      wormholeColors.push(dim, dim)
-      const stem = from.clone().sub(to).normalize().multiplyScalar(-LINK_OFFSET * 1.6)
-      const tip = from.clone().add(stem)
-      const up = new THREE.Vector3(0, 1, 0)
-      for (const angle of [Math.PI / 6, -Math.PI / 6]) {
-        const barb = stem.clone().multiplyScalar(0.5).applyAxisAngle(up, angle)
-        wormholePositions.push(tip, tip.clone().sub(barb))
-        wormholeColors.push(color, color)
-      }
-      wormholePositions.push(from, tip)
-      wormholeColors.push(color, color)
-    }
-  }
-  const wormholeGeometry = new THREE.BufferGeometry().setFromPoints(wormholePositions)
-  wormholeGeometry.setAttribute('color', new THREE.Float32BufferAttribute(wormholeColors.flatMap(c => [c.r, c.g, c.b]), 3))
+  const wormholeGeometry = new THREE.BufferGeometry()
   const wormholes = new THREE.LineSegments(
     wormholeGeometry,
     new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false }),
   )
   wormholes.renderOrder = 2
   scene.add(wormholes)
+
+  function rebuildWormholes() {
+    const wormholePositions = []
+    const wormholeColors = []
+    for (const w of galaxy.wormholes) {
+      const color = new THREE.Color(...(w.color ?? [0.5, 0.2, 0.9]))
+      if (!w.mappable) color.multiplyScalar(0.5)
+      for (const [fromName, toName] of w.links) {
+        const a = systems[index.get(fromName)]
+        const b = systems[index.get(toName)]
+        if (!a || !b) continue
+        const ends = trimmed(a.pos, b.pos, 0.2)
+        if (!ends) continue
+        const [from, to] = ends
+        const dim = color.clone().multiplyScalar(0.45)
+        wormholePositions.push(from, to)
+        wormholeColors.push(dim, dim)
+        const stem = from.clone().sub(to).normalize().multiplyScalar(-LINK_OFFSET * 1.6)
+        const tip = from.clone().add(stem)
+        const up = new THREE.Vector3(0, 1, 0)
+        for (const angle of [Math.PI / 6, -Math.PI / 6]) {
+          const barb = stem.clone().multiplyScalar(0.5).applyAxisAngle(up, angle)
+          wormholePositions.push(tip, tip.clone().sub(barb))
+          wormholeColors.push(color, color)
+        }
+        wormholePositions.push(from, tip)
+        wormholeColors.push(color, color)
+      }
+    }
+    wormholeGeometry.setFromPoints(wormholePositions)
+    wormholeGeometry.setAttribute('color', new THREE.Float32BufferAttribute(wormholeColors.flatMap(c => [c.r, c.g, c.b]), 3))
+  }
+  rebuildWormholes()
 
   // --- System rings -----------------------------------------------------------
   const ringUniforms = { uScale: { value: 1 }, uMinPx: { value: 5 * window.devicePixelRatio } }
@@ -222,11 +229,14 @@ export function createGalaxyScene(container, galaxy, events) {
   let showNames = true
   /** @type {string | null} */ let selected = null
   /** @type {string | null} */ let hovered = null
+  let linkPairs = galaxy.links
+  /** @type {Parameters<typeof setOptions>[0] | null} */
+  let lastOptions = null
 
   function rebuildLinks() {
     const positions = []
     const colors = []
-    for (const [a, b] of galaxy.links) {
+    for (const [a, b] of linkPairs) {
       const i = index.get(a)
       const j = index.get(b)
       if (!shown[i] || !shown[j]) continue
@@ -368,6 +378,21 @@ export function createGalaxyScene(container, galaxy, events) {
 
   rebuildLinks()
 
+  /** @param {{ hiddenSystems: boolean, names: boolean, regions: boolean, eventRegions: boolean, backdrop: boolean, wormholes: boolean }} options */
+  function setOptions(options) {
+    lastOptions = options
+    shown = systems.map((/** @type {any} */ s) => options.hiddenSystems || !(s.hidden || s.inaccessible))
+    const alpha = /** @type {THREE.BufferAttribute} */ (ringGeometry.getAttribute('alpha'))
+    shown.forEach((visible, i) => alpha.setX(i, visible ? 1 : 0))
+    alpha.needsUpdate = true
+    showNames = options.names
+    regionLabels.forEach(m => (m.visible = options.regions && (options.eventRegions || !m.userData.fromEvent)))
+    backdrops.forEach(m => (m.visible = options.backdrop))
+    wormholes.visible = options.wormholes
+    rebuildLinks()
+    if (hovered && !shown[index.get(hovered)]) updateMarker(hoverMarker, (hovered = null))
+  }
+
   return {
     /** @param {number[][]} colors one [r, g, b] per system */
     setColors(colors) {
@@ -375,18 +400,30 @@ export function createGalaxyScene(container, galaxy, events) {
       colors.forEach((c, i) => attribute.setXYZ(i, c[0], c[1], c[2]))
       attribute.needsUpdate = true
     },
-    /** @param {{ hiddenSystems: boolean, names: boolean, regions: boolean, eventRegions: boolean, backdrop: boolean, wormholes: boolean }} options */
-    setOptions(options) {
-      shown = systems.map((/** @type {any} */ s) => options.hiddenSystems || !(s.hidden || s.inaccessible))
-      const alpha = /** @type {THREE.BufferAttribute} */ (ringGeometry.getAttribute('alpha'))
-      shown.forEach((visible, i) => alpha.setX(i, visible ? 1 : 0))
-      alpha.needsUpdate = true
-      showNames = options.names
-      regionLabels.forEach(m => (m.visible = options.regions && (options.eventRegions || !m.userData.fromEvent)))
-      backdrops.forEach(m => (m.visible = options.backdrop))
-      wormholes.visible = options.wormholes
-      rebuildLinks()
-      if (hovered && !shown[index.get(hovered)]) updateMarker(hoverMarker, (hovered = null))
+    setOptions,
+    /**
+     * Show the galaxy in another state, after story events. It must have
+     * the same systems, in the same order.
+     * @param {any} next
+     */
+    setGalaxy(next) {
+      if (next.systems === systems) return
+      galaxy = next
+      systems = next.systems
+      linkPairs = next.links
+      const position = /** @type {THREE.BufferAttribute} */ (ringGeometry.getAttribute('position'))
+      systems.forEach((/** @type {any} */ s, /** @type {number} */ i) => {
+        position.setXYZ(i, s.pos[0], 0.5, s.pos[1])
+        names[i].position.copy(toWorld(s.pos, 0.5))
+        names[i].element.textContent = s.displayName ?? s.name
+      })
+      position.needsUpdate = true
+      ringGeometry.computeBoundingSphere()
+      rebuildWormholes()
+      if (lastOptions) setOptions(lastOptions)
+      else rebuildLinks()
+      updateMarker(selectMarker, selected)
+      updateMarker(hoverMarker, hovered !== selected ? hovered : null)
     },
     /** @param {string | null} name @param {boolean} [fly] */
     select(name, fly = false) {

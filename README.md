@@ -11,12 +11,15 @@ of the game, including development branches. It isn't bound by the game's
 rules: hidden, shrouded and inaccessible systems are all shown, and can be
 picked out with the *Map visibility* colour mode.
 
-Only the galaxy's **base state** is shown, as defined at the top level of the
-game's `data/` files. Mission events change the galaxy as the player
-progresses (adding systems and links, changing governments and so on); none
-of those changes are applied. The one exception is region labels that events
-reveal. Their images follow a predictable naming scheme, so they're shown,
-and can be switched off under *View*.
+Mission events change the galaxy as the player progresses: governments
+change hands, links open and close, hidden systems are revealed. By default
+the map shows the galaxy as if every storyline had been played through.
+Where the story branches, such as how the Free Worlds war ends, *Story* lets
+you pick the outcome. It can also switch the events off, to show the galaxy as
+a new game starts. The *Changed by story events* colour mode picks out the
+systems the story changes, and a system's panel lists the events that changed
+it. Region labels that events reveal are shown either way; they can be
+switched off under *View*.
 
 ## Usage
 
@@ -64,8 +67,11 @@ repository is upstream unless `--repo` names a fork.
   into those a reference can assume have happened (the player completing each
   storyline) and those that hang on a story choice, such as how the Free
   Worlds war ends. It finds the branches from the missions' conditions;
-  `scripts/eventChoices.js` only gives them readable names. Applying them in
-  the viewer is still to come.
+  `scripts/eventChoices.js` only gives them readable names and defaults.
+- `src/lib/data/universe.js` loads systems and planets as the game does. The
+  extractor uses it to read the data files, and the viewer to apply events,
+  since events go through the same loading code as the definitions. The
+  viewer is sent the events' changes already parsed.
 - `src/lib/three/createGalaxyScene.js` draws the map with three.js. One world
   unit is one map unit, and the sizes and offsets of rings and links are taken
   from the game's `MapPanel.cpp`. The colours follow the game's map modes where
