@@ -1,5 +1,5 @@
 // Fetch any ref of the game's repository into a sparse, shallow check-out
-// holding only what the extractor reads: about 30 MB, against about 1 GB for
+// holding only what the extractor reads: about 120 MB, against about 1 GB for
 // a full clone.
 //
 // The check-out is kept and re-used, so moving to another ref fetches only
@@ -13,7 +13,7 @@ import { join } from 'node:path'
 export const UPSTREAM = 'https://github.com/endless-sky/endless-sky.git'
 
 /** Everything extract.js reads: the data files and the sprites it exports. */
-const SPARSE = ['data', 'images/map', 'images/label', 'images/ui']
+const SPARSE = ['data', 'images/map', 'images/label', 'images/ui', 'images/planet', 'images/star']
 
 /**
  * @param {string} dir
@@ -41,10 +41,11 @@ export function fetchRef({ ref, repo = UPSTREAM, dir }) {
     // arbitrary ref such as a pull request.
     git(dir, ['config', 'remote.origin.promisor', 'true'])
     git(dir, ['config', 'remote.origin.partialclonefilter', 'blob:none'])
-    git(dir, ['sparse-checkout', 'set', ...SPARSE])
   } else {
     git(dir, ['remote', 'set-url', 'origin', repo])
   }
+  // Every time, so a check-out made before the set grew picks up the rest.
+  git(dir, ['sparse-checkout', 'set', ...SPARSE])
 
   console.log(`Fetching ${ref} from ${repo}...`)
   git(dir, ['fetch', '--depth=1', '--filter=blob:none', '--no-tags', 'origin', ref])

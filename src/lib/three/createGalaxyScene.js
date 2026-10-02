@@ -7,6 +7,7 @@
 import * as THREE from 'three'
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
+import { flatten } from '../data/universe.js'
 
 // From MapPanel.cpp: the system ring's radii, and the gap links leave around it.
 const RING_OUTER = 6
@@ -275,7 +276,9 @@ export function createGalaxyScene(container, galaxy, events) {
     const byIcon = new Map()
     systems.forEach((/** @type {any} */ s, /** @type {number} */ i) => {
       if (!shown[i]) return
-      const icons = s.stars.map((/** @type {string} */ sprite) => galaxy.stars[sprite]?.icon).filter(Boolean).slice(0, MAX_STARS)
+      // Any object whose sprite stars.txt gives an icon, brown dwarfs included
+      // (System::UpdateSystem), in the order they're defined.
+      const icons = flatten(s.objects).map(o => galaxy.stars[o.sprite]?.icon).filter(Boolean).slice(0, MAX_STARS)
       // As in game: several stars are spread around the system at a turn
       // fixed by its name and position, further out the more there are.
       let angle = 0
@@ -461,8 +464,11 @@ export function createGalaxyScene(container, galaxy, events) {
 
   let lastCenter = ''
   let frame = 0
+  /** While a system view covers the map, there's no need to draw it. */
+  let paused = false
   function animate(/** @type {number} */ now) {
     frame = requestAnimationFrame(animate)
+    if (paused) return
     if (flight) {
       const t = Math.min(1, (now - flight.start) / flight.duration)
       const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
@@ -601,6 +607,10 @@ export function createGalaxyScene(container, galaxy, events) {
         colors.push(...link.color, ...link.color)
       }
       setLines(changedLinks, points, colors)
+    },
+    /** @param {boolean} value */
+    setPaused(value) {
+      paused = value
     },
     resetView() {
       flyTo(start, homeOffset.clone())

@@ -3,6 +3,7 @@
   import Legend from './lib/components/Legend.svelte'
   import Search from './lib/components/Search.svelte'
   import SystemPanel from './lib/components/SystemPanel.svelte'
+  import SystemView from './lib/components/SystemView.svelte'
   import ChangesMenu from './lib/components/ChangesMenu.svelte'
   import StoryMenu from './lib/components/StoryMenu.svelte'
   import { applyEvents, eventsToApply } from './lib/data/applyEvents.js'
@@ -92,8 +93,20 @@
   /** @type {any} */
   let map = $state(null)
 
+  /** Whether the selected system is open in the system view. */
+  let viewing = $state(false)
+  /** @type {string | null} the planet picked in the system view */
+  let focusPlanet = $state(null)
+  /** In the system view, the panel can be put away without leaving. */
+  let panelOpen = $state(true)
+
   /** @param {string | null} name @param {boolean} fly */
   function select(name, fly) {
+    if (name !== selected) {
+      viewing = false
+      focusPlanet = null
+      panelOpen = true
+    }
     selected = name
     map?.select(name, fly)
   }
@@ -107,6 +120,8 @@
   function onKeydown(e) {
     // Leave the keys to a field that has them, such as the search box.
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
+    // The system view has keys of its own, Esc to leave it among them.
+    if (viewing) return
     if (e.key === 'Escape') select(null, false)
     else if (e.key === 'Home') map?.resetView()
   }
@@ -131,13 +146,31 @@
     {options}
     changes={changeOverlay}
     starIcons={mode === 'icons'}
+    paused={viewing}
     bind:api={map}
     onSelect={(/** @type {string | null} */ name) => select(name, false)}
     onHover={(/** @type {string | null} */ name) => (hovered = name)}
     onViewChange={(/** @type {number[]} */ c) => (center = c)}
   />
 
-  <div class="toolbar">
+  {#if viewing && selected && systemsByName.get(selected)}
+    {#key selected}
+      <SystemView
+        {galaxy}
+        system={systemsByName.get(selected)}
+        selectedPlanet={focusPlanet}
+        onSelectPlanet={(/** @type {string | null} */ name) => {
+          focusPlanet = name
+          if (name) panelOpen = true
+        }}
+        {panelOpen}
+        onShowPanel={() => (panelOpen = true)}
+        onClose={() => ((viewing = false), (focusPlanet = null), (panelOpen = true))}
+      />
+    {/key}
+  {/if}
+
+  <div class="toolbar" class:hidden={viewing}>
     <div class="panel title">
       <h1>Endless Sky Galaxy</h1>
       <span class="version" title="{galaxy.source.path} ({galaxy.source.branch}, {galaxy.source.date})">
@@ -193,16 +226,16 @@
     </div>
   </div>
 
-  <Legend {galaxy} {mode} {center} compareVersion={previous?.source.describe} />
+  {#if !viewing}<Legend {galaxy} {mode} {center} compareVersion={previous?.source.describe} />{/if}
 
-  {#if hoveredSystem && hoveredSystem.name !== selected}
+  {#if !viewing && hoveredSystem && hoveredSystem.name !== selected}
     <div class="panel hover">
       {hoveredSystem.displayName ?? hoveredSystem.name}
       <span class="muted">· {galaxy.governments[hoveredSystem.government]?.displayName ?? hoveredSystem.government ?? 'None'}</span>
     </div>
   {/if}
 
-  {#if selected && systemsByName.get(selected)}
+  {#if selected && systemsByName.get(selected) && (!viewing || panelOpen)}
     {#key selected}
       <SystemPanel
         {galaxy}
@@ -211,13 +244,16 @@
         change={changes?.systems.get(selected)}
         compareVersion={previous?.source.describe}
         onFindItem={findItem}
+        {viewing}
+        {focusPlanet}
+        onEnter={() => (viewing = true)}
         onSelectSystem={(/** @type {string} */ name) => select(name, true)}
-        onClose={() => select(null, false)}
+        onClose={() => (viewing ? (panelOpen = false) : select(null, false))}
       />
     {/key}
   {/if}
 
-  <div class="hint">Drag to pan · right-drag to tilt and turn · scroll to zoom · double-click a system to close in · Home to reset view</div>
+  <div class="hint" class:hidden={viewing}>Drag to pan · right-drag to tilt and turn · scroll to zoom · double-click a system to close in · Home to reset view</div>
 {/if}
 
 <style>
@@ -254,6 +290,10 @@
   .version {
     font-size: 12px;
     color: var(--text-medium);
+  }
+
+  .hidden {
+    display: none;
   }
 
   .settings {

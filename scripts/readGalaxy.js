@@ -53,6 +53,7 @@ export async function readGalaxy(ES, { root, sprites }) {
   /** @type {Map<string, string | null>} ship -> category; variants take their base's */ const shipCategories = new Map()
   /** @type {[string, string][]} variant -> base ship */ const variants = []
   /** @type {Record<string, string[]>} the order the game lists categories in (categories.txt) */ const categoryOrder = {}
+  /** @type {number[] | null} day, month, year a new game starts on (starts.txt) */ let startDate = null
   const duplicates = []
 
   /** @param {string[]} values @returns {number[] | null} */
@@ -96,6 +97,9 @@ export async function readGalaxy(ES, { root, sprites }) {
           else if (key === 'link') w.links.push([values[0], values[1]])
           else if (key === 'color') pendingColors.push(() => (w.color = colorOf(values)))
         }
+      } else if (type === 'start' && name === 'default') {
+        const date = node.children.find(c => c.tokens[0] === 'date')
+        if (date) startDate = date.tokens.slice(1, 4).map(Number)
       } else if (type === 'category' && (name === 'ship' || name === 'outfit')) categoryOrder[name] = node.children.map(c => c.tokens[0])
       else if (type === 'outfitter' && name) loadShop(outfitters, node)
       else if (type === 'shipyard' && name) loadShop(shipyards, node)
@@ -110,13 +114,15 @@ export async function readGalaxy(ES, { root, sprites }) {
           if (category || !shipCategories.has(name)) shipCategories.set(name, category ?? null)
         }
       } else if (type === 'star' && name) {
-        const s = stars.get(name) ?? { sprite: name, icon: null, power: null, wind: null }
+        const s = stars.get(name) ?? { sprite: name, icon: null, power: null, wind: null, mass: 0, habitable: 0 }
         stars.set(name, s)
         for (const child of node.children) {
           const [key, value] = child.tokens
           if (key === 'icon') s.icon = value
           else if (key === 'power') s.power = num(value)
           else if (key === 'wind') s.wind = num(value)
+        else if (key === 'mass') s.mass = num(value)
+        else if (key === 'habitable') s.habitable = num(value)
         }
       } else if (type === 'trade') {
         for (const child of node.children)
@@ -129,12 +135,36 @@ export async function readGalaxy(ES, { root, sprites }) {
   pendingColors.forEach(resolveColor => resolveColor())
 
   // ---------------------------------------------------------------------------
-  // Sprites. A sprite name like "label/core" refers to images/label/core+.png,
-  // where the optional character after the name sets the blend mode
-  // ('+' additive, '~' half-additive, '^' pre-multiplied-but-not-really) and
-  // "@2x" marks a high-DPI variant. The first frame of an animation is used.
+  // Sprites. A sprite name like "label/core" refers to an image file such as
+  // images/label/core+.png. As ImageFileData reads a file name: "@2x" marks a
+  // high-DPI variant and "@sw" a swizzle mask (not an image); then trailing
+  // digits are a frame number only when a blend mark comes before them ('-'
+  // normal, '+' additive, '^' or '~' half-additive, '=' pre-multiplied), and a
+  // blend mark alone means frame 0. So "g0" is a star sprite, not frame 0 of
+  // "g". The first frame of an animation is used.
 
-  const SPRITE_FILE = /^(.*?)([+~^=])?(?:[-+~^=]?(\d+))?(@[12]x)?\.(png|jpe?g|webp|avif)$/i
+  const IMAGE = /\.(png|jpe?g|webp|avif)$/i
+  const BLEND = new Set(['-', '^', '+', '=', '~'])
+  /** @param {string} file */
+  function parseImageFile(file) {
+    const ext = file.match(IMAGE)?.[1]
+    if (!ext) return null
+    let name = file.slice(0, -ext.length - 1)
+    let is2x = false
+    if (name.endsWith('@2x')) [name, is2x] = [name.slice(0, -3), true]
+    if (name.endsWith('@1x')) name = name.slice(0, -3)
+    if (name.endsWith('@sw')) return null
+    let at = name.length
+    while (at > 0 && /\d/.test(name[at - 1])) at--
+    let blend = ''
+    let frame = 0
+    if (at > 0 && BLEND.has(name[at - 1])) {
+      blend = name[at - 1]
+      frame = Number(name.slice(at)) || 0
+      name = name.slice(0, at - 1)
+    }
+    return { name, ext: ext.toLowerCase(), is2x, blend, frame }
+  }
   /** @type {Map<string, any>} */
   const spriteCache = new Map()
 
@@ -145,10 +175,10 @@ export async function readGalaxy(ES, { root, sprites }) {
     const dir = join(ES, 'images', dirname(name))
     const base = name.split('/').at(-1)
     const candidates = existsSync(dir)
-      ? readdirSync(dir).map(file => ({ file, m: file.match(SPRITE_FILE) })).filter(c => c.m && c.m[1] === base)
+      ? readdirSync(dir).map(file => ({ file, m: parseImageFile(file) })).filter(c => c.m?.name === base)
       : []
     // Prefer the 1x, first-frame image.
-    candidates.sort((a, b) => Number(a.m?.[4] === '@2x') - Number(b.m?.[4] === '@2x') || Number(a.m?.[3] ?? -1) - Number(b.m?.[3] ?? -1))
+    candidates.sort((a, b) => Number(a.m?.is2x) - Number(b.m?.is2x) || (a.m?.frame ?? 0) - (b.m?.frame ?? 0))
     const pick = candidates[0]
     if (!pick || !pick.m) {
       spriteCache.set(name, null)
@@ -158,20 +188,19 @@ export async function readGalaxy(ES, { root, sprites }) {
     const source = join(dir, pick.file)
     // Copied as they are, not re-encoded: the viewer zooms in much further than
     // the game, so any detail lost to compression shows.
-    const ext = pick.m[5].toLowerCase()
-    const url = `sprites/${name.replace(/[^\w/-]+/g, '_')}.${ext}`
+    const url = `sprites/${name.replace(/[^\w/-]+/g, '_')}.${pick.m.ext}`
     const dest = join(root, 'public', url)
     mkdirSync(dirname(dest), { recursive: true })
     if (!existsSync(dest) || statSync(dest).mtimeMs < statSync(source).mtimeMs) {
       copyFileSync(source, dest)
     }
     const meta = await sharp(source, { limitInputPixels: false }).metadata()
-    const scale = pick.m[4] === '@2x' ? 0.5 : 1
+    const scale = pick.m.is2x ? 0.5 : 1
     const sprite = {
       url,
       width: (meta.width ?? 0) * scale,
       height: (meta.height ?? 0) * scale,
-      additive: pick.m[2] === '+' || pick.m[2] === '~',
+      additive: ['+', '^', '~'].includes(pick.m.blend),
     }
     spriteCache.set(name, sprite)
     return sprite
@@ -196,7 +225,23 @@ export async function readGalaxy(ES, { root, sprites }) {
 
   const outStars = {}
   for (const s of stars.values())
-    outStars[s.sprite] = { icon: await exportSprite(s.icon), power: s.power, wind: s.wind }
+    outStars[s.sprite] = { icon: await exportSprite(s.icon), power: s.power, wind: s.wind, mass: s.mass, habitable: s.habitable }
+
+  // The sprites of every stellar object, for the system view: those in the
+  // definitions, and those events bring in (a bombed planet, say).
+  const objectSprites = new Set(flatten([...systems.values()].flatMap(s => s.objects)).map(o => o.sprite).filter(Boolean))
+  /** @param {DataNode} node */
+  const spritesIn = node => {
+    if (node.tokens[0] === 'sprite' && node.tokens[1]) objectSprites.add(node.tokens[1])
+    node.children.forEach(spritesIn)
+  }
+  for (const node of allNodes) if (node.tokens[0] === 'event') node.children.filter(c => c.tokens[0] === 'system').forEach(spritesIn)
+  /** @type {Record<string, any>} */
+  const outSprites = {}
+  for (const name of [...objectSprites].sort()) {
+    const sprite = await exportSprite(name)
+    if (sprite) outSprites[name] = sprite
+  }
 
   const finished = finishGalaxy(systems.values(), planets.values())
 
@@ -229,6 +274,8 @@ export async function readGalaxy(ES, { root, sprites }) {
     governments: Object.fromEntries([...governments.values()].map(g => [g.name, { displayName: g.displayName, color: g.color }])),
     commodities,
     stars: outStars,
+    sprites: outSprites,
+    startDate,
     systems: finished.systems,
     links: finished.links,
     planets: finished.planets,

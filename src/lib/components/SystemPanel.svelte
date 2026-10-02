@@ -2,7 +2,7 @@
   import Stock from './Stock.svelte'
   import { css, governmentColor, starClass, valueColor, visibilityOf } from '../utils/colors.js'
 
-  let { galaxy, system, planets, change = null, compareVersion = null, onSelectSystem, onFindItem, onClose } = $props()
+  let { galaxy, system, planets, change = null, compareVersion = null, viewing = false, focusPlanet = null, onSelectSystem, onFindItem, onEnter, onClose } = $props()
 
   const governmentName = (/** @type {string | null} */ name) =>
     (name && galaxy.governments[name]?.displayName) ?? name ?? 'None'
@@ -48,6 +48,17 @@
     return `${choice?.label ?? c.choice}: ${option?.label ?? c.option}`
   }).join('; ')
 
+  /** @type {HTMLElement} */
+  let panel
+  // A planet picked in the system view: open its details and bring it into view.
+  $effect(() => {
+    if (!focusPlanet || !panel) return
+    const details = /** @type {HTMLDetailsElement | null} */ (panel.querySelector(`details[data-planet="${CSS.escape(focusPlanet)}"]`))
+    if (!details) return
+    details.open = true
+    details.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  })
+
   /** @param {any[]} objects @returns {number} */
   function countAll(objects) {
     return objects.reduce((n, o) => n + 1 + countAll(o.children), 0)
@@ -66,10 +77,11 @@
   ].filter(Boolean)
 </script>
 
-<aside class="panel system-panel">
+<aside class="panel system-panel" bind:this={panel}>
   <header>
     <span class="swatch" style:color={css(governmentColor(galaxy, system.government))}></span>
     <h2>{system.displayName ?? system.name}</h2>
+    {#if !viewing}<button class="enter" onclick={onEnter} title="See its stars, planets and stations on their orbits">Enter system</button>{/if}
     <button class="close" onclick={onClose} aria-label="Close">×</button>
   </header>
 
@@ -134,7 +146,7 @@
     <section>
       <h3>Planets and stations</h3>
       {#each stellarObjects as { object, planet } (object.name)}
-        <details class="planet" open={stellarObjects.length <= 2}>
+        <details class="planet" open={stellarObjects.length <= 2 || focusPlanet === object.name} data-planet={object.name}>
           <summary>
             <span class="planet-name">{planet?.displayName ?? object.name}</span>
             {#if planet}
@@ -349,6 +361,11 @@
     border-radius: 50%;
     border: 3px solid currentColor;
     flex: none;
+  }
+
+  .enter {
+    font-size: 12px;
+    padding: 2px 8px;
   }
 
   .close {

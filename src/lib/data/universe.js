@@ -38,17 +38,41 @@ function loadChildren(node, target, clear, handle) {
 
 /** @param {DataNode} node @returns {any} */
 export function loadObject(node) {
-  // The name follows the key, which may itself follow "add".
-  const name = node.tokens[node.tokens[0] === 'add' ? 2 : 1] ?? null
-  const object = { name, sprite: null, distance: 0, period: 0, children: [] }
+  // The name follows the key, which may itself follow "add" or "remove".
+  const name = node.tokens[node.tokens[0] === 'add' || node.tokens[0] === 'remove' ? 2 : 1] ?? null
+  // A period of 0 means none was given, and the game works it out from the
+  // masses involved (System::FinishLoading; see orbits.js).
+  const object = { name, sprite: null, distance: 0, period: 0, offset: 0, children: [] }
   for (const child of node.children) {
     const [key, value] = child.tokens
     if (key === 'sprite') object.sprite = value
     else if (key === 'distance') object.distance = num(value)
     else if (key === 'period') object.period = num(value)
+    else if (key === 'offset') object.offset = num(value)
     else if (key === 'object') object.children.push(loadObject(child))
   }
   return object
+}
+
+/**
+ * Remove the first object, at any depth, matching the template the way
+ * System::Load does: by sprite, distance and offset, and by period if the
+ * object has one of its own. Its moons go with it.
+ * @param {any[]} objects @param {any} template
+ * @returns {any[]}
+ */
+function removeObject(objects, template) {
+  let done = false
+  /** @param {any[]} list @returns {any[]} */
+  const visit = list => list.flatMap(o => {
+    if (!done && o.sprite === template.sprite && o.distance === template.distance && o.offset === template.offset
+      && (!o.period || o.period === template.period)) {
+      done = true
+      return []
+    }
+    return [{ ...o, children: visit(o.children) }]
+  })
+  return visit(objects)
 }
 
 /**
@@ -115,7 +139,7 @@ export function loadSystem(systems, node) {
           : [...s.hazards, { name: values[0], period: num(values[1]) }]
         break
       case 'object':
-        if (remove) s.objects = without(s.objects, o => o.name === values[0])
+        if (remove) s.objects = removeObject(s.objects, loadObject(child))
         else s.objects.push(loadObject(child))
         break
     }

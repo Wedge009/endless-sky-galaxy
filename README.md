@@ -6,6 +6,10 @@ the game's flat 2D map, laid out on a plane you can pan across, zoom into, tilt
 and turn. Click a system to see its government, stars, planets and their
 facilities, trade prices and links.
 
+*Enter system* opens a view of the system itself: its stars, planets, moons
+and stations on their orbits, worked out as the game does, on any date from
+the day a new game starts, and played forwards at up to 1000 days a second.
+
 A planet's outfitters and shipyards list what they sell, grouped as the game
 groups them. Click an item, or search for an outfit or ship, to see on the map
 everywhere it's sold.
@@ -39,7 +43,8 @@ check-out to another branch or commit. The version it was extracted from is
 shown next to the title.
 
 You don't need a check-out of the game at all. Give a ref instead, and the
-extractor fetches just the files it needs (about 50 MB) from GitHub:
+extractor fetches just the files it needs from GitHub (about 200 MB, most of it
+planet and star images):
 
 ```sh
 npm run extract -- --ref master           # a branch
@@ -97,6 +102,8 @@ and added.
 - `scripts/readGalaxy.js` reads one check-out; `scripts/extract.js` fetches
   and reads the version shown and the one compared against.
   `src/lib/data/compareGalaxies.js` works out what changed between them.
+- `src/lib/data/orbits.js` places a system's objects on a date, and
+  `src/lib/three/createSystemScene.js` draws them.
 - `src/lib/three/createGalaxyScene.js` draws the map with three.js. One world
   unit is one map unit, and the sizes and offsets of rings and links are taken
   from the game's `MapPanel.cpp`. The colours follow the game's map modes where
