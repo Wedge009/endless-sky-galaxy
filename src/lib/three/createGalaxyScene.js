@@ -264,20 +264,23 @@ export function createGalaxyScene(container, galaxy, events) {
   /** @type {{ from: THREE.Vector3, to: THREE.Vector3, offset: THREE.Vector3, start: number, duration: number } | null} */
   let flight = null
 
+  const viewOffset = () => camera.position.clone().sub(controls.target)
+
   /**
-   * Glide the view to centre on a map position, keeping the camera's angle and,
-   * unless one is given, its distance.
-   * @param {number[]} pos @param {number} [distance]
+   * Glide the view to centre on a map position, keeping the camera's angle and
+   * distance unless given the offset from the centre to end at.
+   * @param {number[]} pos @param {THREE.Vector3} [offset]
    */
-  function flyTo(pos, distance) {
-    const offset = camera.position.clone().sub(controls.target)
-    if (distance) offset.setLength(distance)
+  function flyTo(pos, offset = viewOffset()) {
     flight = { from: controls.target.clone(), to: toWorld(pos), offset, start: performance.now(), duration: 700 }
   }
 
+  // Looking straight down, as the game's map does. The sliver of +Z keeps the
+  // controls' azimuth at zero, so north stays at the top of the view.
+  const homeOffset = new THREE.Vector3(0, 886, 0.01)
   const start = systems[index.get('Sol')]?.pos ?? [0, 0]
   controls.target.copy(toWorld(start))
-  camera.position.copy(toWorld(start)).add(new THREE.Vector3(0, 780, 420))
+  camera.position.copy(toWorld(start)).add(homeOffset)
 
   // --- Picking ----------------------------------------------------------------
   const projected = new THREE.Vector3()
@@ -322,7 +325,7 @@ export function createGalaxyScene(container, galaxy, events) {
   /** @param {MouseEvent} e */
   const onDoubleClick = e => {
     const name = pick(e.clientX, e.clientY)
-    if (name) flyTo(systems[index.get(name)].pos, 260)
+    if (name) flyTo(systems[index.get(name)].pos, viewOffset().setLength(260))
   }
   renderer.domElement.addEventListener('pointerdown', onPointerDown)
   renderer.domElement.addEventListener('pointerup', onPointerUp)
@@ -441,7 +444,7 @@ export function createGalaxyScene(container, galaxy, events) {
       if (name && fly) flyTo(systems[index.get(name)].pos)
     },
     resetView() {
-      flyTo(start, 886)
+      flyTo(start, homeOffset.clone())
     },
     dispose() {
       cancelAnimationFrame(frame)
