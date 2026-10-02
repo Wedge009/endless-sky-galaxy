@@ -60,6 +60,12 @@ repository is upstream unless `--repo` names a fork.
   `galaxy`, `wormhole`, `star`, `color` and `trade` definitions. It applies
   repeat definitions the way the game does (a plain key replaces earlier
   values, `add` appends, `remove` deletes) and resolves sprites to image files.
+- `scripts/events.js` sorts the mission events that change the map or planets
+  into those a reference can assume have happened (the player completing each
+  storyline) and those that hang on a story choice, such as how the Free
+  Worlds war ends. It finds the branches from the missions' conditions;
+  `scripts/eventChoices.js` only gives them readable names. Applying them in
+  the viewer is still to come.
 - `src/lib/three/createGalaxyScene.js` draws the map with three.js. One world
   unit is one map unit, and the sizes and offsets of rings and links are taken
   from the game's `MapPanel.cpp`. The colours follow the game's map modes where

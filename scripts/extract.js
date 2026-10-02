@@ -12,8 +12,10 @@
 // into a sparse, shallow check-out under .cache/, so no local clone is needed.
 // The repository defaults to upstream; --repo picks a fork.
 //
-// Only the base state of the galaxy is extracted: the top-level definitions in
-// data/, before any mission event has added, removed or changed anything.
+// The galaxy's state is the top-level definitions in data/, before any mission
+// event has added, removed or changed anything. Alongside it, the events that
+// change what the viewer shows are classified by scripts/events.js: assumed to
+// have happened, or hanging on one of a few story choices.
 
 import { execSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
@@ -23,6 +25,8 @@ import { parseArgs } from 'node:util'
 import sharp from 'sharp'
 import { parseDataFile } from './dataFile.js'
 import { fetchRef, UPSTREAM } from './fetchRef.js'
+import { analyseEvents } from './events.js'
+import { choiceLabels } from './eventChoices.js'
 
 /** @typedef {import('./dataFile.js').DataNode} DataNode */
 
@@ -264,8 +268,11 @@ function colorOf(values) {
 
 const files = listFiles(join(ES, 'data')).filter(f => !relative(join(ES, 'data'), f).startsWith('_deprecated'))
 const pendingColors = []
+/** @type {DataNode[]} every top-level node, in load order, for the event analysis */
+const allNodes = []
 for (const file of files) {
   for (const node of parseDataFile(file)) {
+    allNodes.push(node)
     const [type, name] = node.tokens
     if (type === 'system' && name) loadSystem(node)
     else if (type === 'planet' && name) loadPlanet(node)
@@ -407,6 +414,20 @@ for (const s of systems.values())
       links.set(key, [s.name, other].sort())
     }
 
+// ---------------------------------------------------------------------------
+// Events. Those that matter change a system as the map shows it, a link, a
+// region label, or a planet; changes to fleets, shops' stock and the like
+// don't show.
+
+const MAP_KEYS = new Set(['pos', 'government', 'link', 'hidden', 'shrouded', 'inaccessible', 'object', 'attributes'])
+/** @param {DataNode} event */
+function isRelevant(event) {
+  return event.children.some(c => ['link', 'unlink', 'galaxy', 'planet'].includes(c.tokens[0])
+    || (c.tokens[0] === 'system' && c.children.some(g => MAP_KEYS.has(g.tokens[g.tokens[0] === 'add' || g.tokens[0] === 'remove' ? 1 : 0]))))
+}
+const analysis = analyseEvents(allNodes, isRelevant, choiceLabels)
+for (const e of Object.values(analysis.events)) e.file = e.file && relative(join(ES, 'data'), e.file)
+
 const commit = git('rev-parse --short HEAD')
 const galaxy = {
   source: {
@@ -427,9 +448,21 @@ const galaxy = {
   links: [...links.values()],
   planets: [...planets.values()].map(p => ({ ...p, system: planetSystem.get(p.name) ?? null, inhabited: isInhabited(p) })),
   wormholes: [...wormholes.values()],
+  events: analysis.events,
+  choices: analysis.choices,
 }
 
 writeFileSync(join(OUT_DATA, 'galaxy.json'), JSON.stringify(galaxy))
 console.log(`Extracted ${galaxy.systems.length} systems, ${galaxy.links.length} links, ${galaxy.planets.length} planets, `
   + `${galaxy.wormholes.length} wormholes and ${outGalaxies.length} galaxy sprites from ${ES} (${galaxy.source.describe}).`)
 if (duplicates.length) console.log(`Merged repeat definitions: ${duplicates.join(', ')}`)
+
+const byStatus = Object.groupBy(Object.values(analysis.events), (/** @type {any} */ e) => e.status)
+console.log(`Events that change the map or planets: ${Object.keys(analysis.events).length} (`
+  + Object.entries(byStatus).map(([status, list]) => `${list?.length} ${status}`).join(', ') + ')')
+for (const c of analysis.choices)
+  console.log(`  Choice: ${c.label ?? c.key}: ${c.options.map((/** @type {any} */ o) => `${o.label ?? o.id}${o.id === c.default ? '*' : ''} (${o.events.length})`).join(' / ')}`)
+const unnamed = analysis.choices.filter((/** @type {any} */ c) => !c.label)
+if (unnamed.length) console.log(`  Choices with no name in scripts/eventChoices.js: ${unnamed.map((/** @type {any} */ c) => c.key).join('; ')}`)
+const stale = Object.keys(choiceLabels).filter(key => !analysis.choices.some((/** @type {any} */ c) => c.key === key))
+if (stale.length) console.log(`  Names in scripts/eventChoices.js matching no choice: ${stale.join('; ')}`)
