@@ -341,14 +341,14 @@ async function exportSprite(name) {
   }
 
   const source = join(dir, pick.file)
-  const isJpeg = /jpe?g$/i.test(pick.m[5])
-  const ext = isJpeg ? 'webp' : pick.m[5].toLowerCase()
+  // Copied as they are, not re-encoded: the viewer zooms in much further than
+  // the game, so any detail lost to compression shows.
+  const ext = pick.m[5].toLowerCase()
   const url = `sprites/${name.replace(/[^\w/-]+/g, '_')}.${ext}`
   const dest = join(ROOT, 'public', url)
   mkdirSync(dirname(dest), { recursive: true })
   if (!existsSync(dest) || statSync(dest).mtimeMs < statSync(source).mtimeMs) {
-    if (isJpeg) await sharp(source, { limitInputPixels: false }).webp({ quality: 82 }).toFile(dest)
-    else copyFileSync(source, dest)
+    copyFileSync(source, dest)
   }
   const meta = await sharp(source, { limitInputPixels: false }).metadata()
   const scale = pick.m[4] === '@2x' ? 0.5 : 1
