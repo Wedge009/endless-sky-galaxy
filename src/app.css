@@ -1,0 +1,81 @@
+/* Greys after the game's interface colours (data/_ui/interfaces.txt):
+   "bright" .75, "medium" .5, "dim" .25, panels .125. */
+
+:root {
+  --bg: #000;
+  --panel-bg: rgba(20, 20, 20, 0.9);
+  --panel-border: #333;
+  --control-bg: rgba(32, 32, 32, 0.95);
+  --control-hover: #3a3a3a;
+  --text: #bfbfbf;
+  --text-bright: #fff;
+  --text-medium: #808080;
+  --text-dim: #555;
+  --accent: #d9b74a;
+  --hidden: #d973ff;
+  --shrouded: #33ccbf;
+  --inaccessible: #ff5a4d;
+  --font: 'Ubuntu', system-ui, sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.4 var(--font);
+}
+
+button,
+select,
+input {
+  font: inherit;
+  color: var(--text);
+  background: var(--control-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  padding: 3px 8px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover,
+select:hover {
+  background: var(--control-hover);
+  color: var(--text-bright);
+}
+
+a {
+  color: var(--text);
+}
+
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  backdrop-filter: blur(4px);
+}
+
+/* The CSS2DRenderer's layer of system names over the canvas. */
+.label-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.system-name {
+  color: rgba(153, 153, 153, 0.85);
+  font: 13px var(--font);
+  white-space: nowrap;
+  text-shadow: 0 0 3px #000, 0 0 2px #000;
+}

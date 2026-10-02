@@ -1,0 +1,420 @@
+// The 3D galaxy: the game's 2D map laid on the XZ plane, so a system at map
+// position (x, y) sits at world (x, 0, y). The map's y axis points down the
+// screen, which with the camera looking down -Y puts the galaxy's north at the
+// top of the view, as in game. One world unit is one map unit (a pixel at the
+// game's 100% map zoom), so sprites are sized by their image dimensions.
+
+import * as THREE from 'three'
+import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
+import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
+
+// From MapPanel.cpp: the system ring's radii, and the gap links leave around it.
+const RING_OUTER = 6
+const RING_INNER = 3.5
+const LINK_OFFSET = 7
+// A system's name shows within this distance of the camera, fading out over the
+// last NAME_FADE, like the game hiding names below 50% zoom. Measured per
+// system, so a tilted view doesn't crowd its horizon with far-off names.
+const NAME_DISTANCE = 1100
+const NAME_FADE = 300
+const PICK_RADIUS_PX = 12
+
+const ringVertex = /* glsl */ `
+  attribute vec3 color;
+  attribute float alpha;
+  attribute float radius;
+  uniform float uScale;
+  uniform float uMinPx;
+  varying vec3 vColor;
+  varying float vAlpha;
+  varying float vInner;
+  void main() {
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mv;
+    float px = radius * 2.0 * uScale / -mv.z;
+    // Keep rings legible when zoomed out, without letting them swell up close.
+    gl_PointSize = clamp(px, uMinPx, 64.0);
+    vColor = color;
+    vAlpha = alpha;
+    vInner = ${(RING_INNER / RING_OUTER).toFixed(4)};
+  }
+`
+const ringFragment = /* glsl */ `
+  varying vec3 vColor;
+  varying float vAlpha;
+  varying float vInner;
+  void main() {
+    float r = length(gl_PointCoord * 2.0 - 1.0);
+    float aa = fwidth(r);
+    float a = smoothstep(vInner - aa, vInner, r) * (1.0 - smoothstep(1.0 - aa, 1.0, r));
+    if (a * vAlpha < 0.01) discard;
+    gl_FragColor = vec4(vColor, a * vAlpha);
+  }
+`
+
+/** @param {number[]} p @param {number} [y] */
+const toWorld = (p, y = 0) => new THREE.Vector3(p[0], y, p[1])
+
+/**
+ * @param {HTMLElement} container
+ * @param {any} galaxy  the extracted galaxy.json
+ * @param {{ onSelect: (name: string | null) => void, onHover: (name: string | null) => void, onViewChange: (center: number[]) => void }} events
+ */
+export function createGalaxyScene(container, galaxy, events) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true })
+  renderer.setPixelRatio(window.devicePixelRatio)
+  renderer.setClearColor(0x000000)
+  container.appendChild(renderer.domElement)
+
+  const labelRenderer = new CSS2DRenderer()
+  labelRenderer.domElement.className = 'label-layer'
+  container.appendChild(labelRenderer.domElement)
+
+  const scene = new THREE.Scene()
+  const camera = new THREE.PerspectiveCamera(45, 1, 1, 60000)
+  const controls = new MapControls(camera, renderer.domElement)
+  controls.enableDamping = true
+  controls.dampingFactor = 0.12
+  controls.zoomToCursor = true
+  controls.minDistance = 30
+  controls.maxDistance = 9000
+  controls.maxPolarAngle = THREE.MathUtils.degToRad(82)
+
+  const systems = galaxy.systems
+  const index = new Map(systems.map((/** @type {any} */ s, /** @type {number} */ i) => [s.name, i]))
+
+  // --- Galaxy backdrop and region labels ----------------------------------
+  const loader = new THREE.TextureLoader()
+  /** @type {THREE.Mesh[]} */ const backdrops = []
+  /** @type {THREE.Mesh[]} */ const regionLabels = []
+  for (const g of galaxy.galaxies) {
+    const texture = loader.load(g.sprite.url)
+    texture.colorSpace = THREE.SRGBColorSpace
+    texture.anisotropy = renderer.capabilities.getMaxAnisotropy()
+    const isLabel = g.name.startsWith('label ')
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      transparent: true,
+      depthWrite: false,
+      blending: g.sprite.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+      opacity: isLabel ? 0.9 : 1,
+    })
+    const plane = new THREE.Mesh(new THREE.PlaneGeometry(g.sprite.width, g.sprite.height), material)
+    plane.rotation.x = -Math.PI / 2
+    plane.position.copy(toWorld(g.pos, isLabel ? -0.5 : -2))
+    plane.renderOrder = isLabel ? 1 : 0
+    plane.userData = { fromEvent: g.fromEvent }
+    scene.add(plane)
+    ;(isLabel ? regionLabels : backdrops).push(plane)
+  }
+
+  // --- Hyperspace links -----------------------------------------------------
+  /** Two points pulled back from each end so the line stops short of the rings. */
+  function trimmed(/** @type {number[]} */ a, /** @type {number[]} */ b, /** @type {number} */ y = 0) {
+    const from = toWorld(a, y)
+    const to = toWorld(b, y)
+    const length = from.distanceTo(to)
+    if (length <= 2 * LINK_OFFSET) return null
+    const unit = to.clone().sub(from).divideScalar(length).multiplyScalar(LINK_OFFSET)
+    return [from.add(unit), to.sub(unit)]
+  }
+
+  const linkGeometry = new THREE.BufferGeometry()
+  const linkMaterial = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false })
+  const links = new THREE.LineSegments(linkGeometry, linkMaterial)
+  links.renderOrder = 2
+  scene.add(links)
+
+  // --- Wormholes, drawn with an arrowhead at the departure end as in game -----
+  const wormholePositions = []
+  const wormholeColors = []
+  for (const w of galaxy.wormholes) {
+    const color = new THREE.Color(...(w.color ?? [0.5, 0.2, 0.9]))
+    if (!w.mappable) color.multiplyScalar(0.5)
+    for (const [fromName, toName] of w.links) {
+      const a = systems[index.get(fromName)]
+      const b = systems[index.get(toName)]
+      if (!a || !b) continue
+      const ends = trimmed(a.pos, b.pos, 0.2)
+      if (!ends) continue
+      const [from, to] = ends
+      const dim = color.clone().multiplyScalar(0.45)
+      wormholePositions.push(from, to)
+      wormholeColors.push(dim, dim)
+      const stem = from.clone().sub(to).normalize().multiplyScalar(-LINK_OFFSET * 1.6)
+      const tip = from.clone().add(stem)
+      const up = new THREE.Vector3(0, 1, 0)
+      for (const angle of [Math.PI / 6, -Math.PI / 6]) {
+        const barb = stem.clone().multiplyScalar(0.5).applyAxisAngle(up, angle)
+        wormholePositions.push(tip, tip.clone().sub(barb))
+        wormholeColors.push(color, color)
+      }
+      wormholePositions.push(from, tip)
+      wormholeColors.push(color, color)
+    }
+  }
+  const wormholeGeometry = new THREE.BufferGeometry().setFromPoints(wormholePositions)
+  wormholeGeometry.setAttribute('color', new THREE.Float32BufferAttribute(wormholeColors.flatMap(c => [c.r, c.g, c.b]), 3))
+  const wormholes = new THREE.LineSegments(
+    wormholeGeometry,
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false }),
+  )
+  wormholes.renderOrder = 2
+  scene.add(wormholes)
+
+  // --- System rings -----------------------------------------------------------
+  const ringUniforms = { uScale: { value: 1 }, uMinPx: { value: 5 * window.devicePixelRatio } }
+  const ringMaterial = new THREE.ShaderMaterial({
+    vertexShader: ringVertex,
+    fragmentShader: ringFragment,
+    uniforms: ringUniforms,
+    transparent: true,
+    depthWrite: false,
+  })
+
+  const ringGeometry = new THREE.BufferGeometry()
+  ringGeometry.setAttribute('position', new THREE.Float32BufferAttribute(systems.flatMap((/** @type {any} */ s) => [s.pos[0], 0.5, s.pos[1]]), 3))
+  ringGeometry.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(systems.length * 3), 3))
+  ringGeometry.setAttribute('alpha', new THREE.Float32BufferAttribute(new Float32Array(systems.length).fill(1), 1))
+  ringGeometry.setAttribute('radius', new THREE.Float32BufferAttribute(new Float32Array(systems.length).fill(RING_OUTER), 1))
+  const rings = new THREE.Points(ringGeometry, ringMaterial)
+  rings.renderOrder = 3
+  scene.add(rings)
+
+  // Selection and hover markers: a single larger ring each.
+  /** @param {number} radius @param {number[]} color */
+  function marker(radius, color) {
+    const geometry = new THREE.BufferGeometry()
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0.6, 0], 3))
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(color, 3))
+    geometry.setAttribute('alpha', new THREE.Float32BufferAttribute([1], 1))
+    geometry.setAttribute('radius', new THREE.Float32BufferAttribute([radius], 1))
+    const points = new THREE.Points(geometry, ringMaterial)
+    points.renderOrder = 4
+    points.visible = false
+    scene.add(points)
+    return points
+  }
+  const selectMarker = marker(11, [1, 1, 1])
+  const hoverMarker = marker(9, [0.6, 0.6, 0.6])
+
+  // --- System names -----------------------------------------------------------
+  const nameLayer = new THREE.Group()
+  scene.add(nameLayer)
+  /** @type {CSS2DObject[]} */
+  const names = systems.map((/** @type {any} */ s) => {
+    const el = document.createElement('div')
+    el.className = 'system-name'
+    el.textContent = s.displayName ?? s.name
+    const label = new CSS2DObject(el)
+    label.position.copy(toWorld(s.pos, 0.5))
+    label.center.set(-0.12, 0.5)
+    nameLayer.add(label)
+    return label
+  })
+
+  /** @type {string[]} last opacity set on each name, to skip redundant style writes */
+  const nameOpacity = names.map(() => '')
+
+  // --- State ------------------------------------------------------------------
+  /** @type {boolean[]} */
+  let shown = systems.map(() => true)
+  let showNames = true
+  /** @type {string | null} */ let selected = null
+  /** @type {string | null} */ let hovered = null
+
+  function rebuildLinks() {
+    const positions = []
+    const colors = []
+    for (const [a, b] of galaxy.links) {
+      const i = index.get(a)
+      const j = index.get(b)
+      if (!shown[i] || !shown[j]) continue
+      const ends = trimmed(systems[i].pos, systems[j].pos)
+      if (!ends) continue
+      // Links into hidden or shrouded space are dimmer, hinting they're not on the in-game map.
+      const veiled = [systems[i], systems[j]].some(s => s.hidden || s.shrouded)
+      const c = veiled ? 0.22 : 0.42
+      positions.push(...ends)
+      colors.push(c, c, c, c, c, c)
+    }
+    linkGeometry.setFromPoints(positions)
+    linkGeometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3))
+  }
+
+  // --- Camera -----------------------------------------------------------------
+  /** @type {{ from: THREE.Vector3, to: THREE.Vector3, offset: THREE.Vector3, start: number, duration: number } | null} */
+  let flight = null
+
+  /**
+   * Glide the view to centre on a map position, keeping the camera's angle and,
+   * unless one is given, its distance.
+   * @param {number[]} pos @param {number} [distance]
+   */
+  function flyTo(pos, distance) {
+    const offset = camera.position.clone().sub(controls.target)
+    if (distance) offset.setLength(distance)
+    flight = { from: controls.target.clone(), to: toWorld(pos), offset, start: performance.now(), duration: 700 }
+  }
+
+  const start = systems[index.get('Sol')]?.pos ?? [0, 0]
+  controls.target.copy(toWorld(start))
+  camera.position.copy(toWorld(start)).add(new THREE.Vector3(0, 780, 420))
+
+  // --- Picking ----------------------------------------------------------------
+  const projected = new THREE.Vector3()
+  /** @param {number} clientX @param {number} clientY @returns {string | null} */
+  function pick(clientX, clientY) {
+    const rect = renderer.domElement.getBoundingClientRect()
+    let best = null
+    let bestDistance = PICK_RADIUS_PX
+    systems.forEach((/** @type {any} */ s, /** @type {number} */ i) => {
+      if (!shown[i]) return
+      projected.set(s.pos[0], 0.5, s.pos[1]).project(camera)
+      if (projected.z > 1) return
+      const x = (projected.x + 1) / 2 * rect.width + rect.left
+      const y = (1 - projected.y) / 2 * rect.height + rect.top
+      const d = Math.hypot(x - clientX, y - clientY)
+      if (d < bestDistance) {
+        bestDistance = d
+        best = s.name
+      }
+    })
+    return best
+  }
+
+  let downAt = /** @type {{ x: number, y: number } | null} */ (null)
+  /** @param {PointerEvent} e */
+  const onPointerDown = e => (downAt = { x: e.clientX, y: e.clientY })
+  /** @param {PointerEvent} e */
+  const onPointerUp = e => {
+    if (e.button !== 0 || !downAt || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 4) return
+    events.onSelect(pick(e.clientX, e.clientY))
+  }
+  /** @param {PointerEvent} e */
+  const onPointerMove = e => {
+    if (e.buttons) return
+    const name = pick(e.clientX, e.clientY)
+    if (name === hovered) return
+    hovered = name
+    renderer.domElement.style.cursor = name ? 'pointer' : ''
+    updateMarker(hoverMarker, name !== selected ? name : null)
+    events.onHover(name)
+  }
+  /** @param {MouseEvent} e */
+  const onDoubleClick = e => {
+    const name = pick(e.clientX, e.clientY)
+    if (name) flyTo(systems[index.get(name)].pos, 260)
+  }
+  renderer.domElement.addEventListener('pointerdown', onPointerDown)
+  renderer.domElement.addEventListener('pointerup', onPointerUp)
+  renderer.domElement.addEventListener('pointermove', onPointerMove)
+  renderer.domElement.addEventListener('dblclick', onDoubleClick)
+
+  /** @param {THREE.Points} points @param {string | null} name */
+  function updateMarker(points, name) {
+    points.visible = name !== null
+    if (name !== null) points.position.copy(toWorld(systems[index.get(name)].pos))
+  }
+
+  // --- Loop -------------------------------------------------------------------
+  function resize() {
+    const { clientWidth: w, clientHeight: h } = container
+    renderer.setSize(w, h)
+    labelRenderer.setSize(w, h)
+    camera.aspect = w / h
+    camera.updateProjectionMatrix()
+    ringUniforms.uScale.value = (h * renderer.getPixelRatio()) / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))
+  }
+  const resizeObserver = new ResizeObserver(resize)
+  resizeObserver.observe(container)
+  resize()
+
+  let lastCenter = ''
+  let frame = 0
+  function animate(/** @type {number} */ now) {
+    frame = requestAnimationFrame(animate)
+    if (flight) {
+      const t = Math.min(1, (now - flight.start) / flight.duration)
+      const ease = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+      const target = flight.from.clone().lerp(flight.to, ease)
+      const offset = camera.position.clone().sub(controls.target).lerp(flight.offset, ease)
+      controls.target.copy(target)
+      camera.position.copy(target).add(offset)
+      if (t >= 1) flight = null
+    }
+    controls.update()
+
+    nameLayer.visible = showNames
+    if (showNames)
+      names.forEach((label, i) => {
+        const distance = camera.position.distanceTo(label.position)
+        label.visible = shown[i] && distance < NAME_DISTANCE
+        if (!label.visible) return
+        const opacity = Math.min(1, (NAME_DISTANCE - distance) / NAME_FADE).toFixed(2)
+        if (nameOpacity[i] !== opacity) label.element.style.opacity = nameOpacity[i] = opacity
+      })
+
+    renderer.render(scene, camera)
+    labelRenderer.render(scene, camera)
+
+    const center = `${Math.round(controls.target.x / 25)},${Math.round(controls.target.z / 25)}`
+    if (center !== lastCenter) {
+      lastCenter = center
+      events.onViewChange([controls.target.x, controls.target.z])
+    }
+  }
+  frame = requestAnimationFrame(animate)
+
+  rebuildLinks()
+
+  return {
+    /** @param {number[][]} colors one [r, g, b] per system */
+    setColors(colors) {
+      const attribute = /** @type {THREE.BufferAttribute} */ (ringGeometry.getAttribute('color'))
+      colors.forEach((c, i) => attribute.setXYZ(i, c[0], c[1], c[2]))
+      attribute.needsUpdate = true
+    },
+    /** @param {{ hiddenSystems: boolean, names: boolean, regions: boolean, eventRegions: boolean, backdrop: boolean, wormholes: boolean }} options */
+    setOptions(options) {
+      shown = systems.map((/** @type {any} */ s) => options.hiddenSystems || !(s.hidden || s.inaccessible))
+      const alpha = /** @type {THREE.BufferAttribute} */ (ringGeometry.getAttribute('alpha'))
+      shown.forEach((visible, i) => alpha.setX(i, visible ? 1 : 0))
+      alpha.needsUpdate = true
+      showNames = options.names
+      regionLabels.forEach(m => (m.visible = options.regions && (options.eventRegions || !m.userData.fromEvent)))
+      backdrops.forEach(m => (m.visible = options.backdrop))
+      wormholes.visible = options.wormholes
+      rebuildLinks()
+      if (hovered && !shown[index.get(hovered)]) updateMarker(hoverMarker, (hovered = null))
+    },
+    /** @param {string | null} name @param {boolean} [fly] */
+    select(name, fly = false) {
+      selected = name
+      updateMarker(selectMarker, name)
+      if (name === hovered) updateMarker(hoverMarker, null)
+      if (name && fly) flyTo(systems[index.get(name)].pos)
+    },
+    resetView() {
+      flyTo(start, 886)
+    },
+    dispose() {
+      cancelAnimationFrame(frame)
+      resizeObserver.disconnect()
+      controls.dispose()
+      renderer.domElement.removeEventListener('pointerdown', onPointerDown)
+      renderer.domElement.removeEventListener('pointerup', onPointerUp)
+      renderer.domElement.removeEventListener('pointermove', onPointerMove)
+      renderer.domElement.removeEventListener('dblclick', onDoubleClick)
+      scene.traverse(o => {
+        const mesh = /** @type {any} */ (o)
+        mesh.geometry?.dispose()
+        mesh.material?.map?.dispose()
+        mesh.material?.dispose()
+      })
+      renderer.dispose()
+      renderer.domElement.remove()
+      labelRenderer.domElement.remove()
+    },
+  }
+}
