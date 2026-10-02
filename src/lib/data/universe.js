@@ -38,7 +38,9 @@ function loadChildren(node, target, clear, handle) {
 
 /** @param {DataNode} node @returns {any} */
 export function loadObject(node) {
-  const object = { name: node.tokens[1] ?? null, sprite: null, distance: 0, period: 0, children: [] }
+  // The name follows the key, which may itself follow "add".
+  const name = node.tokens[node.tokens[0] === 'add' ? 2 : 1] ?? null
+  const object = { name, sprite: null, distance: 0, period: 0, children: [] }
   for (const child of node.children) {
     const [key, value] = child.tokens
     if (key === 'sprite') object.sprite = value

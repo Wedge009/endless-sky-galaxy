@@ -104,11 +104,9 @@ function setsCondition(tokens) {
  * @param {DataNode[]} nodes  every top-level node, in load order
  * @param {object} options
  * @param {(event: DataNode) => boolean} options.isRelevant  whether an event changes something the viewer shows
- * @param {(event: DataNode) => boolean} [options.isSignificant]  whether that's worth a choice:
- *   a branch that only rewords a description isn't
  * @param {Record<string, { label?: string, options?: Record<string, string>, default?: string }>} [options.labels]
  */
-export function analyseEvents(nodes, { isRelevant, isSignificant = isRelevant, labels = {} }) {
+export function analyseEvents(nodes, { isRelevant, labels = {} }) {
   /** @type {Map<string, Mission>} */ const missions = new Map()
   /** @type {Map<string, DataNode>} */ const events = new Map()
   /** @type {Map<string, Trigger[]>} event -> what triggers it */ const triggersOf = new Map()
@@ -338,8 +336,6 @@ export function analyseEvents(nodes, { isRelevant, isSignificant = isRelevant, l
 
   const relevant = new Set([...events].filter(([, node]) => isRelevant(node)).map(([name]) => name))
   const choices = []
-  /** Events of the paths not taken in branches too slight to offer. */
-  const notTaken = new Set()
   for (const c of candidates) {
     const sides = c.options.map(o => sideOf(o.seed))
     let options = c.options.map((o, i) => {
@@ -353,12 +349,6 @@ export function analyseEvents(nodes, { isRelevant, isSignificant = isRelevant, l
     // An outcome whose "not done" side changes nothing visible is just a
     // failure path, not a choice worth offering.
     if (c.kind === 'outcome' && !options[1].events.length) continue
-    // A branch that only changes descriptive text takes its default path.
-    if (!options.some(o => o.events.some(e => isSignificant(events.get(e) ?? { tokens: [], children: [], file: '', line: 0 })))) {
-      const chosen = labels[c.key]?.default ?? options[0].id
-      for (const o of options) if (o.id !== chosen) o.events.forEach(e => notTaken.add(e))
-      continue
-    }
     choices.push({ ...c, options })
   }
 
@@ -420,7 +410,6 @@ export function analyseEvents(nodes, { isRelevant, isSignificant = isRelevant, l
     const path = pathTriggers(name)
     const all = triggersOf.get(name) ?? []
     const status = choiceOf.has(name) ? 'choice'
-      : notTaken.has(name) ? 'alternative'
       : date || path.length ? 'assumed' : all.length ? 'alternative' : 'never'
     // Dated events first, by date; then by depth, phase and delay, taking
     // the deepest trigger.

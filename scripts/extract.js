@@ -28,6 +28,7 @@ import { fetchRef, UPSTREAM } from './fetchRef.js'
 import { analyseEvents } from './events.js'
 import { choiceLabels } from './eventChoices.js'
 import { finishGalaxy, loadPlanet, loadSystem } from '../src/lib/data/universe.js'
+import { applyEvents, eventsToApply } from '../src/lib/data/applyEvents.js'
 
 /** @typedef {import('./dataFile.js').DataNode} DataNode */
 
@@ -243,13 +244,7 @@ function isRelevant(event) {
   return event.children.some(c => ['link', 'unlink', 'galaxy', 'planet'].includes(c.tokens[0])
     || (c.tokens[0] === 'system' && c.children.some(g => MAP_KEYS.has(g.tokens[g.tokens[0] === 'add' || g.tokens[0] === 'remove' ? 1 : 0]))))
 }
-/** Whether an event changes more than a planet's descriptive text. @param {DataNode} event */
-function isSignificant(event) {
-  const TEXT = new Set(['description', 'spaceport'])
-  return isRelevant(event) && event.children.some(c => c.tokens[0] !== 'planet'
-    || c.children.some(g => !TEXT.has(g.tokens[g.tokens[0] === 'add' || g.tokens[0] === 'remove' ? 1 : 0])))
-}
-const analysis = analyseEvents(allNodes, { isRelevant, isSignificant, labels: choiceLabels })
+const analysis = analyseEvents(allNodes, { isRelevant, labels: choiceLabels })
 
 /** A data node without its source position, as the viewer applies it. @param {DataNode} node @returns {any} */
 const bare = node => ({ tokens: node.tokens, children: node.children.map(bare) })
@@ -286,17 +281,50 @@ const galaxy = {
   choices: analysis.choices,
 }
 
+// A choice is only worth offering if its outcomes still differ once every
+// event is applied: later events often settle a branch either way, leaving
+// at most a reworded description or a different rate of fleets. Such a choice
+// takes its default.
+/** @param {any} a @param {any} b */
+function differs(a, b) {
+  const key = (/** @type {string[]} */ l) => l.join('\u0000')
+  const links = new Set(a.links.map(key))
+  if (a.links.length !== b.links.length || b.links.some((/** @type {string[]} */ l) => !links.has(key(l)))) return true
+  // Fleets, minables and hazards are shown by name only, not how often or how many.
+  const names = (/** @type {any[]} */ list) => list.map(x => x.name).sort()
+  const shown = (/** @type {any} */ s) => JSON.stringify({ ...s, fleets: names(s.fleets), minables: names(s.minables), hazards: names(s.hazards) })
+  if (a.systems.some((/** @type {any} */ s, /** @type {number} */ i) => shown(s) !== shown(b.systems[i]))) return true
+  const strip = (/** @type {any} */ p) => JSON.stringify({ ...p, description: null, spaceport: null, port: p.port && { ...p.port, description: null } })
+  return a.planets.some((/** @type {any} */ p, /** @type {number} */ i) => strip(p) !== strip(b.planets[i]))
+}
+const settled = []
+for (const choice of [...galaxy.choices]) {
+  const outcome = (/** @type {string} */ id) => applyEvents(galaxy, eventsToApply(galaxy, { [choice.key]: id }))
+  const chosen = outcome(choice.default)
+  if (choice.options.some((/** @type {any} */ o) => o.id !== choice.default && differs(chosen, outcome(o.id)))) continue
+  galaxy.choices = galaxy.choices.filter((/** @type {any} */ c) => c !== choice)
+  for (const o of choice.options)
+    for (const name of o.events) {
+      const e = galaxy.events[name]
+      e.choices = e.choices.filter((/** @type {any} */ c) => c.choice !== choice.key)
+      if (o.id !== choice.default) e.status = 'alternative'
+      else if (!e.choices.length) e.status = 'assumed'
+    }
+  settled.push(choice.label ?? choice.key)
+}
+
 writeFileSync(join(OUT_DATA, 'galaxy.json'), JSON.stringify(galaxy))
 console.log(`Extracted ${galaxy.systems.length} systems, ${galaxy.links.length} links, ${galaxy.planets.length} planets, `
   + `${galaxy.wormholes.length} wormholes and ${outGalaxies.length} galaxy sprites from ${ES} (${galaxy.source.describe}).`)
 if (duplicates.length) console.log(`Merged repeat definitions: ${duplicates.join(', ')}`)
 
-const byStatus = Object.groupBy(Object.values(analysis.events), (/** @type {any} */ e) => e.status)
-console.log(`Events that change the map or planets: ${Object.keys(analysis.events).length} (`
+const byStatus = Object.groupBy(Object.values(galaxy.events), (/** @type {any} */ e) => e.status)
+console.log(`Events that change the map or planets: ${Object.keys(galaxy.events).length} (`
   + Object.entries(byStatus).map(([status, list]) => `${list?.length} ${status}`).join(', ') + ')')
-for (const c of analysis.choices)
+for (const c of galaxy.choices)
   console.log(`  Choice: ${c.label ?? c.key}: ${c.options.map((/** @type {any} */ o) => `${o.label ?? o.id}${o.id === c.default ? '*' : ''} (${o.events.length})`).join(' / ')}`)
-const unnamed = analysis.choices.filter((/** @type {any} */ c) => !c.label)
+if (settled.length) console.log(`  Settled either way by later events, so not offered: ${settled.join('; ')}`)
+const unnamed = galaxy.choices.filter((/** @type {any} */ c) => !c.label)
 if (unnamed.length) console.log(`  Choices with no name in scripts/eventChoices.js: ${unnamed.map((/** @type {any} */ c) => c.key).join('; ')}`)
 const stale = Object.keys(choiceLabels).filter(key => !analysis.choices.some((/** @type {any} */ c) => c.key === key))
 if (stale.length) console.log(`  Names in scripts/eventChoices.js matching no choice: ${stale.join('; ')}`)
