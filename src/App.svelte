@@ -130,6 +130,7 @@
     {colors}
     {options}
     changes={changeOverlay}
+    starIcons={mode === 'icons'}
     bind:api={map}
     onSelect={(/** @type {string | null} */ name) => select(name, false)}
     onHover={(/** @type {string | null} */ name) => (hovered = name)}
@@ -149,6 +150,7 @@
     <select bind:value={settings.mode} aria-label="Colour systems by">
       <option value="government">Government</option>
       <option value="stars">Star class</option>
+      <option value="icons">Star icons</option>
       <option value="visibility">Map visibility</option>
       <option value="events" disabled={!settings.storyEvents}>Changed by story events</option>
       {#if compareBase}<option value="changes">Changed since {compareBase.source.describe}</option>{/if}

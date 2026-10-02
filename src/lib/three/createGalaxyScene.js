@@ -52,6 +52,30 @@ const ringFragment = /* glsl */ `
   }
 `
 
+// The game's star icons, for its "stars" map mode (MapPanel.cpp, SHOW_STARS):
+// drawn at 0.6 x the cube root of the zoom, at 80% alpha. One world unit is a
+// pixel at 100% zoom, so the zoom is the screen pixels per world unit.
+const iconVertex = /* glsl */ `
+  uniform float uScale;
+  uniform float uPixelRatio;
+  uniform float uSize;
+  void main() {
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    gl_Position = projectionMatrix * mv;
+    float zoom = uScale / -mv.z / uPixelRatio;
+    gl_PointSize = min(uSize * 0.6 * pow(zoom, 1.0 / 3.0) * uPixelRatio, 256.0);
+  }
+`
+const iconFragment = /* glsl */ `
+  uniform sampler2D uMap;
+  void main() {
+    vec4 c = texture2D(uMap, vec2(gl_PointCoord.x, 1.0 - gl_PointCoord.y));
+    gl_FragColor = vec4(c.rgb, c.a * 0.8);
+  }
+`
+/** MapPanel.cpp draws at most this many stars per system. */
+const MAX_STARS = 5
+
 /** @param {number[]} p @param {number} [y] */
 const toWorld = (p, y = 0) => new THREE.Vector3(p[0], y, p[1])
 
@@ -231,6 +255,75 @@ export function createGalaxyScene(container, galaxy, events) {
 
   /** @type {string[]} last opacity set on each name, to skip redundant style writes */
   const nameOpacity = names.map(() => '')
+
+  // --- Star icons, in place of rings in the game's stars mode -----------------
+  const iconLayer = new THREE.Group()
+  iconLayer.visible = false
+  iconLayer.renderOrder = 3
+  scene.add(iconLayer)
+  /** @type {Map<string, THREE.Texture>} */
+  const iconTextures = new Map()
+  let showIcons = false
+
+  function rebuildIcons() {
+    for (const points of /** @type {THREE.Points[]} */ ([...iconLayer.children])) {
+      iconLayer.remove(points)
+      points.geometry.dispose()
+      ;/** @type {THREE.Material} */ (points.material).dispose()
+    }
+    /** @type {Map<string, { icon: any, positions: number[] }>} */
+    const byIcon = new Map()
+    systems.forEach((/** @type {any} */ s, /** @type {number} */ i) => {
+      if (!shown[i]) return
+      const icons = s.stars.map((/** @type {string} */ sprite) => galaxy.stars[sprite]?.icon).filter(Boolean).slice(0, MAX_STARS)
+      // As in game: several stars are spread around the system at a turn
+      // fixed by its name and position, further out the more there are.
+      let angle = 0
+      let spacing = 0
+      let offset = 0
+      if (icons.length > 1) {
+        angle = s.name.length + Math.hypot(s.pos[0], s.pos[1])
+        spacing = 360 / icons.length
+        offset = icons.length * 2
+      }
+      for (const icon of icons) {
+        angle += spacing
+        const radians = THREE.MathUtils.degToRad(angle)
+        // Angle::Unit is (sin, -cos), with the game's y pointing down the screen.
+        const x = s.pos[0] + offset * Math.sin(radians)
+        const y = s.pos[1] - offset * Math.cos(radians)
+        const group = byIcon.get(icon.url) ?? { icon, positions: [] }
+        group.positions.push(x, 0.55, y)
+        byIcon.set(icon.url, group)
+      }
+    })
+    for (const { icon, positions } of byIcon.values()) {
+      let texture = iconTextures.get(icon.url)
+      if (!texture) {
+        texture = loader.load(icon.url)
+        texture.colorSpace = THREE.SRGBColorSpace
+        iconTextures.set(icon.url, texture)
+      }
+      const geometry = new THREE.BufferGeometry()
+      geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3))
+      const material = new THREE.ShaderMaterial({
+        vertexShader: iconVertex,
+        fragmentShader: iconFragment,
+        uniforms: {
+          uScale: ringUniforms.uScale,
+          uPixelRatio: { value: renderer.getPixelRatio() },
+          uSize: { value: Math.max(icon.width, icon.height) },
+          uMap: { value: texture },
+        },
+        transparent: true,
+        depthWrite: false,
+        blending: icon.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
+      })
+      const points = new THREE.Points(geometry, material)
+      points.renderOrder = 3
+      iconLayer.add(points)
+    }
+  }
 
   // --- Changes since another version ------------------------------------------
   // Systems that version had and this one hasn't, as ghost rings with names,
@@ -415,13 +508,14 @@ export function createGalaxyScene(container, galaxy, events) {
     lastOptions = options
     shown = systems.map((/** @type {any} */ s) => options.hiddenSystems || !(s.hidden || s.inaccessible))
     const alpha = /** @type {THREE.BufferAttribute} */ (ringGeometry.getAttribute('alpha'))
-    shown.forEach((visible, i) => alpha.setX(i, visible ? 1 : 0))
+    shown.forEach((visible, i) => alpha.setX(i, visible && !showIcons ? 1 : 0))
     alpha.needsUpdate = true
     showNames = options.names
     regionLabels.forEach(m => (m.visible = options.regions && (options.eventRegions || !m.userData.fromEvent)))
     backdrops.forEach(m => (m.visible = options.backdrop))
     wormholes.visible = options.wormholes
     rebuildLinks()
+    if (showIcons) rebuildIcons()
     if (hovered && !shown[index.get(hovered)]) updateMarker(hoverMarker, (hovered = null))
   }
 
@@ -433,6 +527,14 @@ export function createGalaxyScene(container, galaxy, events) {
       attribute.needsUpdate = true
     },
     setOptions,
+    /** Draw the game's star icons in place of the rings, or not. @param {boolean} visible */
+    setStarIcons(visible) {
+      if (visible === showIcons) return
+      showIcons = visible
+      iconLayer.visible = visible
+      if (lastOptions) setOptions(lastOptions)
+      else if (visible) rebuildIcons()
+    },
     /**
      * Show the galaxy in another state, after story events. It must have
      * the same systems, in the same order.
@@ -479,7 +581,7 @@ export function createGalaxyScene(container, galaxy, events) {
       ghosts.geometry.setAttribute('radius', new THREE.Float32BufferAttribute(ghostList.map(() => RING_OUTER), 1))
       for (const label of [...ghostLayer.children]) {
         ghostLayer.remove(label)
-        /** @type {CSS2DObject} */ (label).element.remove()
+        ;/** @type {CSS2DObject} */ (label).element.remove()
       }
       for (const g of ghostList) {
         const el = document.createElement('div')
@@ -515,6 +617,7 @@ export function createGalaxyScene(container, galaxy, events) {
         const mesh = /** @type {any} */ (o)
         mesh.geometry?.dispose()
         mesh.material?.map?.dispose()
+        mesh.material?.uniforms?.uMap?.value?.dispose()
         mesh.material?.dispose()
       })
       renderer.dispose()

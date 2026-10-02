@@ -40,6 +40,8 @@
     {#each Object.entries(STAR_CLASS_COLORS) as [name, color]}
       <div class="row"><span class="ring" style:color={css(color)}></span>{name === 'none' ? 'No star' : name.length === 1 ? `${name} class` : name}</div>
     {/each}
+  {:else if mode === 'icons'}
+    <div class="row muted-row">Each system's stars, as the in-game map draws them</div>
   {:else if mode === 'visibility'}
     {#each Object.entries(VISIBILITY_COLORS) as [name, color]}
       <div class="row"><span class="ring" style:color={css(color)}></span>{name}</div>
@@ -84,6 +86,11 @@
     align-items: center;
     gap: 8px;
     line-height: 1.6;
+  }
+
+  .muted-row {
+    max-width: 180px;
+    color: var(--text-medium);
   }
 
   .title {

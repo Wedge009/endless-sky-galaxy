@@ -99,7 +99,7 @@ export const CHANGE_COLORS = {
 
 /**
  * @param {any} galaxy
- * @param {string} mode  'government' | 'stars' | 'visibility' | 'events' | 'changes' | 'commodity:<name>' | 'sells:<outfit|ship>:<name>'
+ * @param {string} mode  'government' | 'stars' | 'icons' | 'visibility' | 'events' | 'changes' | 'commodity:<name>' | 'sells:<outfit|ship>:<name>'
  * @param {ReturnType<typeof import('../data/compareGalaxies.js').compareGalaxies> | null} [changes]
  *   what's changed since another version, for the 'changes' mode
  * @returns {number[][]}
@@ -114,6 +114,9 @@ export function systemColors(galaxy, mode, changes = null) {
       return valueColor(((price - commodity.low) / (commodity.high - commodity.low)) * 2 - 1)
     })
   }
+  // The rings are hidden behind the game's star icons; keep governments for
+  // the selection and anything else drawn in a system's colour.
+  if (mode === 'icons') return systemColors(galaxy, 'government')
   if (mode === 'stars')
     return galaxy.systems.map((/** @type {any} */ s) => STAR_CLASS_COLORS[starClass(s.stars[0])])
   if (mode.startsWith('sells:')) {

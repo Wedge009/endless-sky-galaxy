@@ -3,7 +3,7 @@
   import { createGalaxyScene } from '../three/createGalaxyScene.js'
 
   // `api` is bound by the parent to move the camera and mark the selection.
-  let { galaxy, colors, options, changes, onSelect, onHover, onViewChange, api = $bindable() } = $props()
+  let { galaxy, colors, options, changes, starIcons = false, onSelect, onHover, onViewChange, api = $bindable() } = $props()
 
   /** @type {HTMLDivElement} */
   let container
@@ -25,6 +25,7 @@
   $effect(() => scene?.setColors(colors))
   $effect(() => scene?.setOptions({ ...options }))
   $effect(() => scene?.setChanges(changes))
+  $effect(() => scene?.setStarIcons(starIcons))
 </script>
 
 <div class="map" bind:this={container}></div>
