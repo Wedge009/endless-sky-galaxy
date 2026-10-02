@@ -2,9 +2,15 @@
 // copying the sprites the viewer needs into public/sprites/.
 //
 //   npm run extract [-- /path/to/endless-sky]
+//   npm run extract -- --ref <ref> [--repo <url>]
 //
-// The check-out uses ../endless-sky by default (or $ES_PATH). Any branch, tag or
-// working tree can be pointed at, which is how development versions are viewed.
+// The first form reads a local check-out: ../endless-sky by default (or
+// $ES_PATH). Any branch, tag or working tree can be pointed at, which is how
+// development versions are viewed.
+//
+// The second fetches a branch, tag or pull request (pull/<n>/head) from GitHub
+// into a sparse, shallow check-out under .cache/, so no local clone is needed.
+// The repository defaults to upstream; --repo picks a fork.
 //
 // Only the base state of the galaxy is extracted: the top-level definitions in
 // data/, before any mission event has added, removed or changed anything.
@@ -13,13 +19,36 @@ import { execSync } from 'node:child_process'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseArgs } from 'node:util'
 import sharp from 'sharp'
 import { parseDataFile } from './dataFile.js'
+import { fetchRef, UPSTREAM } from './fetchRef.js'
 
 /** @typedef {import('./dataFile.js').DataNode} DataNode */
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const ES = resolve(process.argv[2] ?? process.env.ES_PATH ?? join(ROOT, '..', 'endless-sky'))
+const args = parseArgs({
+  allowPositionals: true,
+  options: { ref: { type: 'string' }, repo: { type: 'string' } },
+})
+const { ref, repo = UPSTREAM } = args.values
+if (ref && args.positionals.length) {
+  console.error('Give either a check-out path or --ref, not both.')
+  process.exit(1)
+}
+const CACHE = join(ROOT, '.cache', 'endless-sky')
+let fetched = null
+if (ref) {
+  try {
+    fetched = fetchRef({ ref, repo, dir: CACHE })
+  } catch {
+    // git has already said why on stderr.
+    console.error(`Couldn't fetch ${ref} from ${repo}.`)
+    process.exit(1)
+  }
+}
+const ES = ref ? CACHE
+  : resolve(args.positionals[0] ?? process.env.ES_PATH ?? join(ROOT, '..', 'endless-sky'))
 const OUT_DATA = join(ROOT, 'public', 'data')
 const OUT_SPRITES = join(ROOT, 'public', 'sprites')
 
@@ -381,10 +410,12 @@ for (const s of systems.values())
 const commit = git('rev-parse --short HEAD')
 const galaxy = {
   source: {
-    path: ES,
-    describe: git('describe --tags --always --dirty'),
+    path: ref ? repo : ES,
+    // A shallow fetch has no tags to describe from, so name it by its tag if
+    // it has one, or else by the ref it was fetched as.
+    describe: fetched ? fetched.tag ?? `${ref}-g${commit}` : git('describe --tags --always --dirty'),
     commit,
-    branch: git('rev-parse --abbrev-ref HEAD'),
+    branch: ref ?? git('rev-parse --abbrev-ref HEAD'),
     date: git('log -1 --format=%cI'),
     extracted: new Date().toISOString(),
   },

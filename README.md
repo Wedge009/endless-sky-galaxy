@@ -31,6 +31,20 @@ needs into `public/sprites/` (both git-ignored). Re-run it after switching the
 check-out to another branch or commit. The version it was extracted from is
 shown next to the title.
 
+You don't need a check-out of the game at all. Give a ref instead, and the
+extractor fetches just the files it needs (about 50 MB) from GitHub:
+
+```sh
+npm run extract -- --ref master           # a branch
+npm run extract -- --ref v0.11.3          # a release tag
+npm run extract -- --ref pull/12766/head  # a pull request
+npm run extract -- --ref my-branch --repo https://github.com/someone/endless-sky.git
+```
+
+The sparse, shallow check-out is kept in `.cache/endless-sky/` (git-ignored)
+and re-used, so moving to another ref only fetches what changed. The
+repository is upstream unless `--repo` names a fork.
+
 ### Controls
 
 - Drag to pan.
