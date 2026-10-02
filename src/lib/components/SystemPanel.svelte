@@ -1,7 +1,7 @@
 <script>
   import { css, governmentColor, starClass, valueColor, visibilityOf } from '../utils/colors.js'
 
-  let { galaxy, system, planets, onSelectSystem, onClose } = $props()
+  let { galaxy, system, planets, change = null, compareVersion = null, onSelectSystem, onClose } = $props()
 
   const governmentName = (/** @type {string | null} */ name) =>
     (name && galaxy.governments[name]?.displayName) ?? name ?? 'None'
@@ -103,6 +103,31 @@
         {#if system.inaccessible}<span class="chip inaccessible" title="Cannot be travelled to in-game">inaccessible</span>{/if}
         {#each system.attributes as attribute}<span class="chip">{attribute}</span>{/each}
       </div>
+    {/if}
+
+    {#if change}
+      <section>
+        <h3>Since {compareVersion}</h3>
+        {#if change.status === 'added'}
+          <p class="new">New in this version.</p>
+        {:else}
+          <dl class="changes">
+            {#each change.changes as c}
+              <dt>{c.what}</dt>
+              <dd>
+                {#if c.items}
+                  {#each c.items as item}<div>{item}</div>{/each}
+                {:else if c.added || c.removed}
+                  {#each c.added as item}<div class="added">+ {item}</div>{/each}
+                  {#each c.removed as item}<div class="removed">− {item}</div>{/each}
+                {:else if c.before !== undefined}
+                  <span class="muted">{c.before}</span> → {c.after}
+                {/if}
+              </dd>
+            {/each}
+          </dl>
+        {/if}
+      </section>
     {/if}
 
     <section>
@@ -258,6 +283,30 @@
 </aside>
 
 <style>
+  .changes {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 2px 10px;
+    margin: 0;
+  }
+
+  .changes dt {
+    color: var(--text-medium);
+  }
+
+  .changes dd {
+    margin: 0;
+  }
+
+  .new,
+  .added {
+    color: rgb(90 230 100);
+  }
+
+  .removed {
+    color: rgb(255 110 100);
+  }
+
   .events {
     margin: 0;
     padding-left: 18px;

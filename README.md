@@ -48,6 +48,24 @@ The sparse, shallow check-out is kept in `.cache/endless-sky/` (git-ignored)
 and re-used, so moving to another ref only fetches what changed. The
 repository is upstream unless `--repo` names a fork.
 
+### What's changed since another version
+
+The extractor also reads a second version to compare against: the latest
+release, or for a release, the one before it. *Since <version>* then lists
+the systems that are new, removed or changed, and can colour the map by them,
+with removed systems and links drawn as red ghosts and new links in green. A
+system's panel says what changed: its government, links, planets, services,
+prices and so on. Both versions are compared after their story events, with
+the same story choices. Pick another version, or none:
+
+```sh
+npm run extract -- --ref master --compare v0.10.0
+npm run extract -- --compare none
+```
+
+Systems and planets are matched by name, so a renamed one shows as removed
+and added.
+
 ### Controls
 
 - Drag to pan.
@@ -72,6 +90,9 @@ repository is upstream unless `--repo` names a fork.
   extractor uses it to read the data files, and the viewer to apply events,
   since events go through the same loading code as the definitions. The
   viewer is sent the events' changes already parsed.
+- `scripts/readGalaxy.js` reads one check-out; `scripts/extract.js` fetches
+  and reads the version shown and the one compared against.
+  `src/lib/data/compareGalaxies.js` works out what changed between them.
 - `src/lib/three/createGalaxyScene.js` draws the map with three.js. One world
   unit is one map unit, and the sizes and offsets of rings and links are taken
   from the game's `MapPanel.cpp`. The colours follow the game's map modes where

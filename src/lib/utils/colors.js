@@ -67,12 +67,23 @@ export const EVENT_COLORS = {
   unchanged: [0.3, 0.3, 0.3],
 }
 
+/** For the changes since another version, systems and links alike. @type {Record<string, number[]>} */
+export const CHANGE_COLORS = {
+  new: [0.35, 0.9, 0.4],
+  changed: [1, 0.72, 0.25],
+  'description only': [0.6, 0.5, 0.32],
+  removed: [1, 0.35, 0.3],
+  unchanged: [0.3, 0.3, 0.3],
+}
+
 /**
  * @param {any} galaxy
- * @param {string} mode  'government' | 'stars' | 'visibility' | 'events' | 'commodity:<name>'
+ * @param {string} mode  'government' | 'stars' | 'visibility' | 'events' | 'changes' | 'commodity:<name>'
+ * @param {ReturnType<typeof import('../data/compareGalaxies.js').compareGalaxies> | null} [changes]
+ *   what's changed since another version, for the 'changes' mode
  * @returns {number[][]}
  */
-export function systemColors(galaxy, mode) {
+export function systemColors(galaxy, mode, changes = null) {
   const uninhabited = governmentColor(galaxy, 'Uninhabited')
   if (mode.startsWith('commodity:')) {
     const commodity = galaxy.commodities.find((/** @type {any} */ c) => c.name === mode.slice(10))
@@ -84,6 +95,11 @@ export function systemColors(galaxy, mode) {
   }
   if (mode === 'stars')
     return galaxy.systems.map((/** @type {any} */ s) => STAR_CLASS_COLORS[starClass(s.stars[0])])
+  if (mode === 'changes')
+    return galaxy.systems.map((/** @type {any} */ s) => {
+      const status = changes?.systems.get(s.name)?.status
+      return CHANGE_COLORS[{ added: 'new', changed: 'changed', reworded: 'description only' }[status ?? ''] ?? 'unchanged']
+    })
   if (mode === 'events')
     return galaxy.systems.map((/** @type {any} */ s) => EVENT_COLORS[galaxy.changedBy?.has(s.name) ? 'changed by story events' : 'unchanged'])
   if (mode === 'visibility')

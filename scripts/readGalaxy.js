@@ -1,0 +1,262 @@
+// Read one Endless Sky check-out into the galaxy the viewer shows: the
+// top-level definitions in data/, before any mission event has changed
+// anything, and the events that change what the viewer shows, classified by
+// scripts/events.js as assumed to have happened or hanging on a story choice.
+
+import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { dirname, join, relative } from 'node:path'
+import sharp from 'sharp'
+import { parseDataFile } from './dataFile.js'
+import { analyseEvents } from './events.js'
+import { choiceLabels } from './eventChoices.js'
+import { finishGalaxy, flatten, loadPlanet, loadSystem } from '../src/lib/data/universe.js'
+import { applyEvents, eventsToApply } from '../src/lib/data/applyEvents.js'
+
+/** @typedef {import('./dataFile.js').DataNode} DataNode */
+
+/**
+ * @param {string} ES  the check-out
+ * @param {{ root: string, sprites: boolean }} options  `root` is this project, for
+ *   exporting sprites into public/; without `sprites`, none are exported and
+ *   the galaxy has no backdrop, region labels or star icons, as for a version
+ *   that's only compared against
+ */
+export async function readGalaxy(ES, { root, sprites }) {
+  /** @param {string} dir @returns {string[]} */
+  function listFiles(dir) {
+    return readdirSync(dir, { withFileTypes: true })
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+      .flatMap(entry => {
+        const path = join(dir, entry.name)
+        return entry.isDirectory() ? listFiles(path) : entry.name.endsWith('.txt') ? [path] : []
+      })
+  }
+
+  const num = (/** @type {string} */ s) => Number.parseFloat(s)
+
+  // ---------------------------------------------------------------------------
+  // Load every top-level definition the map needs. Systems and planets are
+  // loaded by src/lib/data/universe.js, which the viewer shares for applying
+  // events.
+
+  /** @type {Map<string, any>} */ const systems = new Map()
+  /** @type {Map<string, any>} */ const planets = new Map()
+  /** @type {Map<string, any>} */ const governments = new Map()
+  /** @type {Map<string, any>} */ const galaxies = new Map()
+  /** @type {Map<string, any>} */ const wormholes = new Map()
+  /** @type {Map<string, any>} */ const stars = new Map()
+  /** @type {Map<string, number[]>} */ const colors = new Map()
+  /** @type {{ name: string, low: number, high: number }[]} */ const commodities = []
+  const duplicates = []
+
+  /** @param {string[]} values @returns {number[] | null} */
+  function colorOf(values) {
+    if (values.length >= 3 && values.slice(0, 3).every(v => !Number.isNaN(num(v)))) return values.slice(0, 3).map(num)
+    return colors.get(values[0]) ?? null
+  }
+
+  const files = listFiles(join(ES, 'data')).filter(f => !relative(join(ES, 'data'), f).startsWith('_deprecated'))
+  const pendingColors = []
+  /** @type {DataNode[]} every top-level node, in load order, for the event analysis */
+  const allNodes = []
+  for (const file of files) {
+    for (const node of parseDataFile(file)) {
+      allNodes.push(node)
+      const [type, name] = node.tokens
+      if (type === 'system' && name) loadSystem(systems, node) && duplicates.push(`system ${name}`)
+      else if (type === 'planet' && name) loadPlanet(planets, node) && duplicates.push(`planet ${name}`)
+      else if (type === 'color' && name && node.tokens.length >= 5) colors.set(name, node.tokens.slice(2, 5).map(num))
+      else if (type === 'government' && name) {
+        const g = governments.get(name) ?? { name, displayName: null, color: null }
+        governments.set(name, g)
+        for (const child of node.children) {
+          if (child.tokens[0] === 'color') pendingColors.push(() => (g.color = colorOf(child.tokens.slice(1)) ?? g.color))
+          else if (child.tokens[0] === 'display name') g.displayName = child.tokens[1]
+        }
+      } else if (type === 'galaxy' && name) {
+        const g = galaxies.get(name) ?? { name, pos: [0, 0], sprite: null }
+        galaxies.set(name, g)
+        for (const child of node.children) {
+          if (child.tokens[0] === 'pos') g.pos = [num(child.tokens[1]), num(child.tokens[2])]
+          else if (child.tokens[0] === 'sprite') g.sprite = child.tokens[1]
+        }
+      } else if (type === 'wormhole' && name) {
+        const w = wormholes.get(name) ?? { name, displayName: null, mappable: false, links: [], color: null }
+        wormholes.set(name, w)
+        for (const child of node.children) {
+          const [key, ...values] = child.tokens
+          if (key === 'mappable') w.mappable = true
+          else if (key === 'display name') w.displayName = values[0]
+          else if (key === 'link') w.links.push([values[0], values[1]])
+          else if (key === 'color') pendingColors.push(() => (w.color = colorOf(values)))
+        }
+      } else if (type === 'star' && name) {
+        const s = stars.get(name) ?? { sprite: name, icon: null, power: null, wind: null }
+        stars.set(name, s)
+        for (const child of node.children) {
+          const [key, value] = child.tokens
+          if (key === 'icon') s.icon = value
+          else if (key === 'power') s.power = num(value)
+          else if (key === 'wind') s.wind = num(value)
+        }
+      } else if (type === 'trade') {
+        for (const child of node.children)
+          if (child.tokens[0] === 'commodity' && child.tokens.length >= 4)
+            commodities.push({ name: child.tokens[1], low: num(child.tokens[2]), high: num(child.tokens[3]) })
+      }
+    }
+  }
+  // Colours may be named before they're defined, so resolve them last.
+  pendingColors.forEach(resolveColor => resolveColor())
+
+  // ---------------------------------------------------------------------------
+  // Sprites. A sprite name like "label/core" refers to images/label/core+.png,
+  // where the optional character after the name sets the blend mode
+  // ('+' additive, '~' half-additive, '^' pre-multiplied-but-not-really) and
+  // "@2x" marks a high-DPI variant. The first frame of an animation is used.
+
+  const SPRITE_FILE = /^(.*?)([+~^=])?(?:[-+~^=]?(\d+))?(@[12]x)?\.(png|jpe?g|webp|avif)$/i
+  /** @type {Map<string, any>} */
+  const spriteCache = new Map()
+
+  /** @param {string | null} name */
+  async function exportSprite(name) {
+    if (!name || !sprites) return null
+    if (spriteCache.has(name)) return spriteCache.get(name)
+    const dir = join(ES, 'images', dirname(name))
+    const base = name.split('/').at(-1)
+    const candidates = existsSync(dir)
+      ? readdirSync(dir).map(file => ({ file, m: file.match(SPRITE_FILE) })).filter(c => c.m && c.m[1] === base)
+      : []
+    // Prefer the 1x, first-frame image.
+    candidates.sort((a, b) => Number(a.m?.[4] === '@2x') - Number(b.m?.[4] === '@2x') || Number(a.m?.[3] ?? -1) - Number(b.m?.[3] ?? -1))
+    const pick = candidates[0]
+    if (!pick || !pick.m) {
+      spriteCache.set(name, null)
+      return null
+    }
+
+    const source = join(dir, pick.file)
+    // Copied as they are, not re-encoded: the viewer zooms in much further than
+    // the game, so any detail lost to compression shows.
+    const ext = pick.m[5].toLowerCase()
+    const url = `sprites/${name.replace(/[^\w/-]+/g, '_')}.${ext}`
+    const dest = join(root, 'public', url)
+    mkdirSync(dirname(dest), { recursive: true })
+    if (!existsSync(dest) || statSync(dest).mtimeMs < statSync(source).mtimeMs) {
+      copyFileSync(source, dest)
+    }
+    const meta = await sharp(source, { limitInputPixels: false }).metadata()
+    const scale = pick.m[4] === '@2x' ? 0.5 : 1
+    const sprite = {
+      url,
+      width: (meta.width ?? 0) * scale,
+      height: (meta.height ?? 0) * scale,
+      additive: pick.m[2] === '+' || pick.m[2] === '~',
+    }
+    spriteCache.set(name, sprite)
+    return sprite
+  }
+
+  // ---------------------------------------------------------------------------
+  // Assemble the galaxy.
+
+  const outGalaxies = []
+  for (const g of galaxies.values()) {
+    // Region labels without a sprite are revealed by an event as the player
+    // explores. Their images follow the "label <region>" naming, so show them.
+    let sprite = g.sprite
+    let fromEvent = false
+    if (!sprite && g.name.startsWith('label ')) {
+      sprite = `label/${g.name.slice(6)}`
+      fromEvent = true
+    }
+    const exported = await exportSprite(sprite)
+    if (exported) outGalaxies.push({ name: g.name, pos: g.pos, sprite: exported, fromEvent })
+  }
+
+  const outStars = {}
+  for (const s of stars.values())
+    outStars[s.sprite] = { icon: await exportSprite(s.icon), power: s.power, wind: s.wind }
+
+  const finished = finishGalaxy(systems.values(), planets.values())
+
+  // ---------------------------------------------------------------------------
+  // Events. Those that matter change a system as the map shows it, a link, a
+  // region label, or a planet; changes to fleets, shops' stock and the like
+  // don't show.
+
+  const MAP_KEYS = new Set(['pos', 'government', 'link', 'hidden', 'shrouded', 'inaccessible', 'object', 'attributes'])
+  /** @param {DataNode} event */
+  function isRelevant(event) {
+    return event.children.some(c => ['link', 'unlink', 'galaxy', 'planet'].includes(c.tokens[0])
+      || (c.tokens[0] === 'system' && c.children.some(g => MAP_KEYS.has(g.tokens[g.tokens[0] === 'add' || g.tokens[0] === 'remove' ? 1 : 0]))))
+  }
+  const analysis = analyseEvents(allNodes, { isRelevant, labels: choiceLabels })
+
+  /** A data node without its source position, as the viewer applies it. @param {DataNode} node @returns {any} */
+  const bare = node => ({ tokens: node.tokens, children: node.children.map(bare) })
+  const eventNodes = new Map(allNodes.filter(n => n.tokens[0] === 'event').map(n => [n.tokens[1], n]))
+  for (const [name, e] of Object.entries(analysis.events)) {
+    e.file = e.file && relative(join(ES, 'data'), e.file)
+    // The changes the viewer applies (see applyChange in src/lib/data/universe.js).
+    e.changes = (eventNodes.get(name)?.children ?? [])
+      .filter(c => ['system', 'planet', 'link', 'unlink'].includes(c.tokens[0]))
+      .map(bare)
+  }
+
+  const galaxy = {
+    galaxies: outGalaxies,
+    governments: Object.fromEntries([...governments.values()].map(g => [g.name, { displayName: g.displayName, color: g.color }])),
+    commodities,
+    stars: outStars,
+    systems: finished.systems,
+    links: finished.links,
+    planets: finished.planets,
+    wormholes: [...wormholes.values()],
+    events: analysis.events,
+    choices: analysis.choices,
+  }
+
+  // A choice is only worth offering if its outcomes still differ in what a
+  // reference map shows, once every event is applied. Later events often settle
+  // a branch either way, leaving only reworded text, fleets coming more or less
+  // often, or details of play such as the reputation needed to land. Such a
+  // choice takes its default.
+  /** @param {any} a @param {any} b */
+  function differs(a, b) {
+    const key = (/** @type {string[]} */ l) => l.join('\u0000')
+    const links = new Set(a.links.map(key))
+    if (a.links.length !== b.links.length || b.links.some((/** @type {string[]} */ l) => !links.has(key(l)))) return true
+    // Fleets, minables and hazards are shown by name, not how often or how many.
+    const names = (/** @type {any[]} */ list) => list.map(x => x.name).sort()
+    // Stellar objects by name and sprite, as a system view would show them, but
+    // not their order: events replace an object by removing and adding it, which
+    // moves it to the end.
+    const named = (/** @type {any[]} */ objects) => flatten(objects).map(o => `${o.name}\u0000${o.sprite}`).sort()
+    const system = (/** @type {any} */ s) => JSON.stringify({
+      ...s, fleets: names(s.fleets), minables: names(s.minables), hazards: names(s.hazards), objects: named(s.objects), stars: null,
+    })
+    if (a.systems.some((/** @type {any} */ s, /** @type {number} */ i) => system(s) !== system(b.systems[i]))) return true
+    const planet = (/** @type {any} */ p) => JSON.stringify({
+      ...p, description: null, spaceport: null, port: p.port && { ...p.port, description: null }, requiredReputation: null, bribe: null,
+    })
+    return a.planets.some((/** @type {any} */ p, /** @type {number} */ i) => planet(p) !== planet(b.planets[i]))
+  }
+  const settled = []
+  for (const choice of [...galaxy.choices]) {
+    const outcome = (/** @type {string} */ id) => applyEvents(galaxy, eventsToApply(galaxy, { [choice.key]: id }))
+    const chosen = outcome(choice.default)
+    if (choice.options.some((/** @type {any} */ o) => o.id !== choice.default && differs(chosen, outcome(o.id)))) continue
+    galaxy.choices = galaxy.choices.filter((/** @type {any} */ c) => c !== choice)
+    for (const o of choice.options)
+      for (const name of o.events) {
+        const e = galaxy.events[name]
+        e.choices = e.choices.filter((/** @type {any} */ c) => c.choice !== choice.key)
+        if (o.id !== choice.default) e.status = 'alternative'
+        else if (!e.choices.length) e.status = 'assumed'
+      }
+    settled.push(choice.label ?? choice.key)
+  }
+  return { galaxy, duplicates, analysis, settled }
+}

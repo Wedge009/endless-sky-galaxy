@@ -64,3 +64,21 @@ export function fetchRef({ ref, repo = UPSTREAM, dir }) {
   } catch {}
   return { commit, tag }
 }
+
+/**
+ * The repository's release tags, newest first: vX.Y.Z only, so neither the
+ * "continuous" tag nor any pre-release counts.
+ * @param {string} [repo]
+ * @returns {string[]}
+ */
+export function releaseTags(repo = UPSTREAM) {
+  const out = execFileSync('git', ['ls-remote', '--tags', '--refs', repo], { stdio: ['ignore', 'pipe', 'ignore'] }).toString()
+  const version = (/** @type {string} */ tag) => tag.slice(1).split('.').map(Number)
+  return out.split('\n')
+    .map(line => line.split('\t')[1]?.replace(/^refs\/tags\//, ''))
+    .filter(tag => tag && /^v\d+\.\d+\.\d+$/.test(tag))
+    .sort((a, b) => {
+      const [x, y] = [version(a), version(b)]
+      return y[0] - x[0] || y[1] - x[1] || y[2] - x[2]
+    })
+}

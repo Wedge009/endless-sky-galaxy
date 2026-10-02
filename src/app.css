@@ -79,3 +79,9 @@ a {
   white-space: nowrap;
   text-shadow: 0 0 3px #000, 0 0 2px #000;
 }
+
+/* A system the compared version had and this one hasn't. */
+.system-name.ghost {
+  color: rgba(255, 110, 100, 0.8);
+  text-decoration: line-through;
+}

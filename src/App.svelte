@@ -3,9 +3,11 @@
   import Legend from './lib/components/Legend.svelte'
   import Search from './lib/components/Search.svelte'
   import SystemPanel from './lib/components/SystemPanel.svelte'
+  import ChangesMenu from './lib/components/ChangesMenu.svelte'
   import StoryMenu from './lib/components/StoryMenu.svelte'
   import { applyEvents, eventsToApply } from './lib/data/applyEvents.js'
-  import { systemColors } from './lib/utils/colors.js'
+  import { compareGalaxies } from './lib/data/compareGalaxies.js'
+  import { CHANGE_COLORS, systemColors } from './lib/utils/colors.js'
   import { load, save } from './lib/utils/persisted.js'
 
   /** The galaxy as extracted: its base state, before any story event. @type {any} */
@@ -16,6 +18,13 @@
     .then(r => (r.ok ? r.json() : Promise.reject(new Error(`${r.status} ${r.statusText}`))))
     .then(data => (base = data))
     .catch(e => (error = String(e.message ?? e)))
+
+  /** The version to show changes since, if one was extracted. @type {any} */
+  let compareBase = $state.raw(null)
+  fetch('data/compare.json')
+    .then(r => (r.ok ? r.json() : null))
+    .then(data => (compareBase = data))
+    .catch(() => {})
 
   let settings = $state(
     load('settings', {
@@ -45,10 +54,32 @@
   let applied = $derived(base && settings.storyEvents ? eventsToApply(base, settings.choices) : [])
   /** The galaxy shown: the base state, or after the story's events. @type {any} */
   let galaxy = $derived(base && (settings.storyEvents ? applyEvents(base, applied) : base))
+  // The compared version in the same state: with its own story events, for the
+  // same choices where it has them, or without any.
+  let previous = $derived(compareBase && (settings.storyEvents
+    ? applyEvents(compareBase, eventsToApply(compareBase, settings.choices))
+    : compareBase))
+  let changes = $derived(galaxy && previous ? compareGalaxies(galaxy, previous) : null)
 
-  // Without events nothing is changed by them, so fall back to governments.
-  let mode = $derived(settings.mode === 'events' && !settings.storyEvents ? 'government' : settings.mode)
-  let colors = $derived(galaxy ? systemColors(galaxy, mode) : [])
+  // Without events nothing is changed by them, and without another version
+  // nothing has changed since, so fall back to governments.
+  let mode = $derived((settings.mode === 'events' && !settings.storyEvents) || (settings.mode === 'changes' && !changes)
+    ? 'government' : settings.mode)
+  let colors = $derived(galaxy ? systemColors(galaxy, mode, changes) : [])
+  /** What the map draws over the systems in the changes mode. */
+  let changeOverlay = $derived.by(() => {
+    if (mode !== 'changes' || !changes) return null
+    const positions = new Map([...previous.systems, ...galaxy.systems].map((/** @type {any} */ s) => [s.name, s.pos]))
+    const link = (/** @type {string[]} */ l, /** @type {number[]} */ color) => ({ from: positions.get(l[0]), to: positions.get(l[1]), color })
+    return {
+      ghosts: changes.removedSystems.map((/** @type {any} */ s) => ({ name: s.displayName ?? s.name, pos: s.pos })),
+      ghostColor: CHANGE_COLORS.removed,
+      links: [
+        ...changes.addedLinks.map(l => link(l, CHANGE_COLORS.new)),
+        ...changes.removedLinks.map(l => link(l, CHANGE_COLORS.removed)),
+      ],
+    }
+  })
   let systemsByName = $derived(galaxy ? new Map(galaxy.systems.map((/** @type {any} */ s) => [s.name, s])) : new Map())
   let planetsByName = $derived(galaxy ? new Map(galaxy.planets.map((/** @type {any} */ p) => [p.name, p])) : new Map())
 
@@ -93,6 +124,7 @@
     {galaxy}
     {colors}
     {options}
+    changes={changeOverlay}
     bind:api={map}
     onSelect={(/** @type {string | null} */ name) => select(name, false)}
     onHover={(/** @type {string | null} */ name) => (hovered = name)}
@@ -114,12 +146,22 @@
       <option value="stars">Star class</option>
       <option value="visibility">Map visibility</option>
       <option value="events" disabled={!settings.storyEvents}>Changed by story events</option>
+      {#if compareBase}<option value="changes">Changed since {compareBase.source.describe}</option>{/if}
       <optgroup label="Commodity price">
         {#each galaxy.commodities as c (c.name)}
           <option value="commodity:{c.name}">{c.name}</option>
         {/each}
       </optgroup>
     </select>
+
+    {#if changes}
+      <ChangesMenu
+        {changes}
+        version={previous.source.describe}
+        onShow={() => (settings.mode = 'changes')}
+        onSelectSystem={(/** @type {string} */ name) => select(name, true)}
+      />
+    {/if}
 
     <StoryMenu {galaxy} bind:enabled={settings.storyEvents} bind:choices={settings.choices} appliedCount={applied.length} />
 
@@ -141,7 +183,7 @@
     </div>
   </div>
 
-  <Legend {galaxy} {mode} {center} />
+  <Legend {galaxy} {mode} {center} compareVersion={previous?.source.describe} />
 
   {#if hoveredSystem && hoveredSystem.name !== selected}
     <div class="panel hover">
@@ -156,6 +198,8 @@
         {galaxy}
         system={systemsByName.get(selected)}
         planets={planetsByName}
+        change={changes?.systems.get(selected)}
+        compareVersion={previous?.source.describe}
         onSelectSystem={(/** @type {string} */ name) => select(name, true)}
         onClose={() => select(null, false)}
       />

@@ -232,6 +232,21 @@ export function createGalaxyScene(container, galaxy, events) {
   /** @type {string[]} last opacity set on each name, to skip redundant style writes */
   const nameOpacity = names.map(() => '')
 
+  // --- Changes since another version ------------------------------------------
+  // Systems that version had and this one hasn't, as ghost rings with names,
+  // and the links added or removed since, drawn over the normal ones.
+  const ghosts = new THREE.Points(new THREE.BufferGeometry(), ringMaterial)
+  ghosts.renderOrder = 3
+  scene.add(ghosts)
+  const changedLinks = new THREE.LineSegments(
+    new THREE.BufferGeometry(),
+    new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false }),
+  )
+  changedLinks.renderOrder = 2
+  scene.add(changedLinks)
+  const ghostLayer = new THREE.Group()
+  nameLayer.add(ghostLayer)
+
   // --- State ------------------------------------------------------------------
   /** @type {boolean[]} */
   let shown = systems.map(() => true)
@@ -367,7 +382,7 @@ export function createGalaxyScene(container, galaxy, events) {
     controls.update()
 
     nameLayer.visible = showNames
-    if (showNames)
+    if (showNames) {
       names.forEach((label, i) => {
         const distance = camera.position.distanceTo(label.position)
         label.visible = shown[i] && distance < NAME_DISTANCE
@@ -375,6 +390,12 @@ export function createGalaxyScene(container, galaxy, events) {
         const opacity = Math.min(1, (NAME_DISTANCE - distance) / NAME_FADE).toFixed(2)
         if (nameOpacity[i] !== opacity) label.element.style.opacity = nameOpacity[i] = opacity
       })
+      for (const label of /** @type {CSS2DObject[]} */ (ghostLayer.children)) {
+        const distance = camera.position.distanceTo(label.position)
+        label.visible = distance < NAME_DISTANCE
+        if (label.visible) label.element.style.opacity = Math.min(1, (NAME_DISTANCE - distance) / NAME_FADE).toFixed(2)
+      }
+    }
 
     renderer.render(scene, camera)
     labelRenderer.render(scene, camera)
@@ -442,6 +463,42 @@ export function createGalaxyScene(container, galaxy, events) {
       updateMarker(selectMarker, name)
       if (name === hovered) updateMarker(hoverMarker, null)
       if (name && fly) flyTo(systems[index.get(name)].pos)
+    },
+    /**
+     * Show what's changed since another version, or nothing.
+     * @param {{ ghosts: { name: string, pos: number[] }[], ghostColor: number[],
+     *   links: { from: number[], to: number[], color: number[] }[] } | null} changes
+     */
+    setChanges(changes) {
+      const ghostList = changes?.ghosts ?? []
+      ghosts.geometry.dispose()
+      ghosts.geometry = new THREE.BufferGeometry()
+      ghosts.geometry.setAttribute('position', new THREE.Float32BufferAttribute(ghostList.flatMap(g => [g.pos[0], 0.5, g.pos[1]]), 3))
+      ghosts.geometry.setAttribute('color', new THREE.Float32BufferAttribute(ghostList.flatMap(() => changes?.ghostColor ?? []), 3))
+      ghosts.geometry.setAttribute('alpha', new THREE.Float32BufferAttribute(ghostList.map(() => 0.75), 1))
+      ghosts.geometry.setAttribute('radius', new THREE.Float32BufferAttribute(ghostList.map(() => RING_OUTER), 1))
+      for (const label of [...ghostLayer.children]) {
+        ghostLayer.remove(label)
+        /** @type {CSS2DObject} */ (label).element.remove()
+      }
+      for (const g of ghostList) {
+        const el = document.createElement('div')
+        el.className = 'system-name ghost'
+        el.textContent = g.name
+        const label = new CSS2DObject(el)
+        label.position.copy(toWorld(g.pos, 0.5))
+        label.center.set(-0.12, 0.5)
+        ghostLayer.add(label)
+      }
+      const points = []
+      const colors = []
+      for (const link of changes?.links ?? []) {
+        const ends = trimmed(link.from, link.to, 0.1)
+        if (!ends) continue
+        points.push(...ends)
+        colors.push(...link.color, ...link.color)
+      }
+      setLines(changedLinks, points, colors)
     },
     resetView() {
       flyTo(start, homeOffset.clone())
