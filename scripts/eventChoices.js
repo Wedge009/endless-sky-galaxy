@@ -3,10 +3,12 @@
 // joined with " | ". The options of an outcome are "done" and "not done".
 //
 // This only names choices and picks their defaults; finding them is
-// automatic. A choice missing from here is still offered, under its mission
-// names, so a new branch in a later version of the game shows up rather than
-// being silently applied. Keys that no longer match are reported by the
-// extractor.
+// automatic. Without a default here, a choice defaults to its first option.
+// Where one is set, neither path is clearly the more usual, so it's a pick.
+//
+// A choice missing from here is still offered, under its mission names, so a
+// new branch in a later version of the game shows up rather than being
+// silently applied. Keys that no longer match are reported by the extractor.
 
 /** @type {Record<string, { label: string, options: Record<string, string>, default?: string }>} */
 export const choiceLabels = {
@@ -17,10 +19,7 @@ export const choiceLabels = {
   'FW Pirates: Attack 1 | FW Pirates: Diplomacy 1': {
     label: 'Free Worlds: the southern pirates',
     options: { 'FW Pirates: Attack 1': 'Attack', 'FW Pirates: Diplomacy 1': 'Negotiate' },
-  },
-  'FW Southern Prisoners - Release | FW Southern Prisoners - Keep': {
-    label: 'Free Worlds: the southern prisoners',
-    options: { 'FW Southern Prisoners - Release': 'Release them', 'FW Southern Prisoners - Keep': 'Keep them' },
+    default: 'FW Pirates: Diplomacy 1',
   },
   'FW Northern 4.1A | FW Northern 4.2A': {
     label: 'Free Worlds: Poisonwood (karma and Oathkeeper reputation)',

@@ -425,7 +425,13 @@ function isRelevant(event) {
   return event.children.some(c => ['link', 'unlink', 'galaxy', 'planet'].includes(c.tokens[0])
     || (c.tokens[0] === 'system' && c.children.some(g => MAP_KEYS.has(g.tokens[g.tokens[0] === 'add' || g.tokens[0] === 'remove' ? 1 : 0]))))
 }
-const analysis = analyseEvents(allNodes, isRelevant, choiceLabels)
+/** Whether an event changes more than a planet's descriptive text. @param {DataNode} event */
+function isSignificant(event) {
+  const TEXT = new Set(['description', 'spaceport'])
+  return isRelevant(event) && event.children.some(c => c.tokens[0] !== 'planet'
+    || c.children.some(g => !TEXT.has(g.tokens[g.tokens[0] === 'add' || g.tokens[0] === 'remove' ? 1 : 0])))
+}
+const analysis = analyseEvents(allNodes, { isRelevant, isSignificant, labels: choiceLabels })
 for (const e of Object.values(analysis.events)) e.file = e.file && relative(join(ES, 'data'), e.file)
 
 const commit = git('rev-parse --short HEAD')
