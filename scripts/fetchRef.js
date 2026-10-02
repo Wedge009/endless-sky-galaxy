@@ -13,7 +13,7 @@ import { join } from 'node:path'
 export const UPSTREAM = 'https://github.com/endless-sky/endless-sky.git'
 
 /** Everything extract.js reads: the data files and the sprites it exports. */
-const SPARSE = ['data', 'images/map', 'images/label', 'images/ui', 'images/planet', 'images/star']
+const SPARSE = ['data', 'images/map', 'images/label', 'images/ui', 'images/planet', 'images/star', 'images/_menu']
 
 /**
  * @param {string} dir

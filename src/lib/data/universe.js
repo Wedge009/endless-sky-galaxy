@@ -87,7 +87,7 @@ export function loadSystem(systems, node) {
   const s = systems.get(name) ?? {
     name, displayName: null, pos: [0, 0], government: null, attributes: [], links: [],
     hidden: false, shrouded: false, inaccessible: false,
-    jumpRange: null, belt: [], haze: null, objects: [], trade: {}, fleets: [], minables: [], hazards: [],
+    jumpRange: null, belt: [], haze: null, starfieldDensity: 1, objects: [], trade: {}, fleets: [], minables: [], hazards: [],
   }
   systems.set(name, s)
   loadChildren(node, s, {
@@ -113,6 +113,7 @@ export function loadSystem(systems, node) {
       case 'government': s.government = values[0]; break
       case 'hidden': case 'shrouded': case 'inaccessible': s[key] = !remove; break
       case 'jump range': s.jumpRange = num(values[0]); break
+      case 'starfield density': s.starfieldDensity = remove ? 1 : num(values[0]); break
       case 'haze': s.haze = values[0]; break
       case 'belt': s.belt.push(num(values[0])); break
       case 'attributes':

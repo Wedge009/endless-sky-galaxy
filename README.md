@@ -9,6 +9,9 @@ facilities, trade prices and links.
 *Enter system* opens a view of the system itself: its stars, planets, moons
 and stations on their orbits, worked out as the game does, on any date from
 the day a new game starts, and played forwards at up to 1000 days a second.
+Behind them is the system's background as the game draws it in flight: a
+field of stars, thinned out in sparse systems, and patches of the system's
+haze.
 
 A planet's outfitters and shipyards list what they sell, grouped as the game
 groups them. Click an item, or search for an outfit or ship, to see on the map
@@ -103,7 +106,8 @@ and added.
   and reads the version shown and the one compared against.
   `src/lib/data/compareGalaxies.js` works out what changed between them.
 - `src/lib/data/orbits.js` places a system's objects on a date, and
-  `src/lib/three/createSystemScene.js` draws them.
+  `src/lib/three/createSystemScene.js` draws them, over the background from
+  `src/lib/three/createBackground.js` (after the game's `StarField.cpp`).
 - `src/lib/three/createGalaxyScene.js` draws the map with three.js. One world
   unit is one map unit, and the sizes and offsets of rings and links are taken
   from the game's `MapPanel.cpp`. The colours follow the game's map modes where

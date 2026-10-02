@@ -8,6 +8,7 @@ import * as THREE from 'three'
 import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import { orbitsOf, positionsOn } from '../data/orbits.js'
+import { createBackground } from './createBackground.js'
 
 const PICK_RADIUS_PX = 10
 // Planets are small beside their orbits (Earth is 180 across, 966 from the
@@ -25,6 +26,11 @@ export function createSystemScene(container, galaxy, system, events) {
   const renderer = new THREE.WebGLRenderer({ antialias: true })
   renderer.setPixelRatio(window.devicePixelRatio)
   renderer.setClearColor(0x000000)
+  // The background is drawn first, on its own, then the system over it.
+  renderer.autoClear = false
+  const background = createBackground(galaxy, renderer)
+  background.setSystem(system)
+  let showBackground = true
   container.appendChild(renderer.domElement)
 
   const labelRenderer = new CSS2DRenderer()
@@ -197,6 +203,28 @@ export function createSystemScene(container, galaxy, system, events) {
   renderer.domElement.addEventListener('pointerup', onPointerUp)
   renderer.domElement.addEventListener('pointermove', onPointerMove)
 
+  // --- Background ---------------------------------------------------------------
+  // Drawn flat behind the system, so it needs the view's centre, how many
+  // pixels a map unit spans there, and which way the map's axes point on
+  // screen, all read off the camera.
+  const origin = new THREE.Vector3()
+  const along = new THREE.Vector3()
+  /** @param {THREE.Vector3} v @returns {number[]} CSS pixels, y down */
+  const toScreen = v => {
+    const p = v.clone().project(camera)
+    return [(p.x + 1) / 2 * container.clientWidth, (1 - p.y) / 2 * container.clientHeight]
+  }
+  function drawBackground() {
+    const target = controls.target
+    const [ox, oy] = toScreen(origin.copy(target))
+    const [xx, xy] = toScreen(along.copy(target).add(new THREE.Vector3(1, 0, 0)))
+    const [zx, zy] = toScreen(along.copy(target).add(new THREE.Vector3(0, 0, 1)))
+    // Tilting foreshortens one axis; the other still gives the scale.
+    const zoom = Math.max(Math.hypot(xx - ox, xy - oy), Math.hypot(zx - ox, zy - oy))
+    const angle = Math.atan2(xy - oy, xx - ox)
+    background.render([target.x, target.z], zoom, angle, container.clientWidth, container.clientHeight)
+  }
+
   // --- Loop -------------------------------------------------------------------
   function resize() {
     const { clientWidth: w, clientHeight: h } = container
@@ -224,6 +252,8 @@ export function createSystemScene(container, galaxy, system, events) {
     last = now
     controls.update()
     fitSprites()
+    renderer.clear()
+    if (showBackground) drawBackground()
     renderer.render(scene, camera)
     labelRenderer.render(scene, camera)
   }
@@ -244,6 +274,10 @@ export function createSystemScene(container, galaxy, system, events) {
       for (const item of items) item.label?.element.classList.toggle('selected', item.orbit.object.name === name)
     },
     resetView,
+    /** @param {boolean} visible */
+    setBackground(visible) {
+      showBackground = visible
+    },
     dispose() {
       cancelAnimationFrame(frame)
       resizeObserver.disconnect()
@@ -257,6 +291,7 @@ export function createSystemScene(container, galaxy, system, events) {
         mesh.material?.dispose()
       })
       textures.forEach(t => t.dispose())
+      background.dispose()
       renderer.dispose()
       renderer.domElement.remove()
       labelRenderer.domElement.remove()

@@ -19,6 +19,7 @@
   let days = $state(startDays)
   let playing = $state(false)
   let speed = $state(1)
+  let showBackground = $state(true)
 
   onMount(() => {
     scene = createSystemScene(container, galaxy, system, { onSelect: name => onSelectPlanet(name) })
@@ -28,6 +29,7 @@
 
   $effect(() => scene?.play(playing ? speed : 0, d => (days = d)))
   $effect(() => scene?.select(selectedPlanet))
+  $effect(() => scene?.setBackground(showBackground))
 
   let date = $derived(dateFromDays(Math.floor(days)))
   let isoDate = $derived(`${String(date[2]).padStart(4, '0')}-${String(date[1]).padStart(2, '0')}-${String(date[0]).padStart(2, '0')}`)
@@ -78,6 +80,9 @@
       </select>
       <button onclick={reset} title="Back to the day a new game starts">Reset</button>
     </div>
+    <label class="panel toggle" title="The stars and haze the game draws behind the system">
+      <input type="checkbox" bind:checked={showBackground} /> Background
+    </label>
     {#if !panelOpen}<button onclick={onShowPanel}>Details</button>{/if}
   </div>
 
@@ -137,6 +142,14 @@
     align-items: center;
     gap: 6px;
     padding: 3px 6px;
+  }
+
+  .toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
   }
 
   .controls button {
