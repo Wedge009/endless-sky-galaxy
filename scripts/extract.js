@@ -27,7 +27,7 @@ import { parseDataFile } from './dataFile.js'
 import { fetchRef, UPSTREAM } from './fetchRef.js'
 import { analyseEvents } from './events.js'
 import { choiceLabels } from './eventChoices.js'
-import { finishGalaxy, loadPlanet, loadSystem } from '../src/lib/data/universe.js'
+import { finishGalaxy, flatten, loadPlanet, loadSystem } from '../src/lib/data/universe.js'
 import { applyEvents, eventsToApply } from '../src/lib/data/applyEvents.js'
 
 /** @typedef {import('./dataFile.js').DataNode} DataNode */
@@ -281,21 +281,30 @@ const galaxy = {
   choices: analysis.choices,
 }
 
-// A choice is only worth offering if its outcomes still differ once every
-// event is applied: later events often settle a branch either way, leaving
-// at most a reworded description or a different rate of fleets. Such a choice
-// takes its default.
+// A choice is only worth offering if its outcomes still differ in what a
+// reference map shows, once every event is applied. Later events often settle
+// a branch either way, leaving only reworded text, fleets coming more or less
+// often, or details of play such as the reputation needed to land. Such a
+// choice takes its default.
 /** @param {any} a @param {any} b */
 function differs(a, b) {
   const key = (/** @type {string[]} */ l) => l.join('\u0000')
   const links = new Set(a.links.map(key))
   if (a.links.length !== b.links.length || b.links.some((/** @type {string[]} */ l) => !links.has(key(l)))) return true
-  // Fleets, minables and hazards are shown by name only, not how often or how many.
+  // Fleets, minables and hazards are shown by name, not how often or how many.
   const names = (/** @type {any[]} */ list) => list.map(x => x.name).sort()
-  const shown = (/** @type {any} */ s) => JSON.stringify({ ...s, fleets: names(s.fleets), minables: names(s.minables), hazards: names(s.hazards) })
-  if (a.systems.some((/** @type {any} */ s, /** @type {number} */ i) => shown(s) !== shown(b.systems[i]))) return true
-  const strip = (/** @type {any} */ p) => JSON.stringify({ ...p, description: null, spaceport: null, port: p.port && { ...p.port, description: null } })
-  return a.planets.some((/** @type {any} */ p, /** @type {number} */ i) => strip(p) !== strip(b.planets[i]))
+  // Stellar objects by name and sprite, as a system view would show them, but
+  // not their order: events replace an object by removing and adding it, which
+  // moves it to the end.
+  const named = (/** @type {any[]} */ objects) => flatten(objects).map(o => `${o.name}\u0000${o.sprite}`).sort()
+  const system = (/** @type {any} */ s) => JSON.stringify({
+    ...s, fleets: names(s.fleets), minables: names(s.minables), hazards: names(s.hazards), objects: named(s.objects), stars: null,
+  })
+  if (a.systems.some((/** @type {any} */ s, /** @type {number} */ i) => system(s) !== system(b.systems[i]))) return true
+  const planet = (/** @type {any} */ p) => JSON.stringify({
+    ...p, description: null, spaceport: null, port: p.port && { ...p.port, description: null }, requiredReputation: null, bribe: null,
+  })
+  return a.planets.some((/** @type {any} */ p, /** @type {number} */ i) => planet(p) !== planet(b.planets[i]))
 }
 const settled = []
 for (const choice of [...galaxy.choices]) {
