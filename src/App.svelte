@@ -69,7 +69,10 @@
 
   /** @param {KeyboardEvent} e */
   function onKeydown(e) {
-    if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement)) select(null, false)
+    // Leave the keys to a field that has them, such as the search box.
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return
+    if (e.key === 'Escape') select(null, false)
+    else if (e.key === 'Home') map?.resetView()
   }
 
   let hoveredSystem = $derived(hovered ? systemsByName.get(hovered) : null)
@@ -132,7 +135,7 @@
           </label>
           <label><input type="checkbox" bind:checked={settings.wormholes} /> Wormholes</label>
           <label><input type="checkbox" bind:checked={settings.backdrop} /> Milky Way backdrop</label>
-          <button class="reset" onclick={() => map?.resetView()}>Reset view</button>
+          <button class="reset" onclick={() => map?.resetView()} title="Home">Reset view</button>
         </div>
       {/if}
     </div>
@@ -159,7 +162,7 @@
     {/key}
   {/if}
 
-  <div class="hint">Drag to pan · right-drag to tilt and turn · scroll to zoom · double-click a system to close in</div>
+  <div class="hint">Drag to pan · right-drag to tilt and turn · scroll to zoom · double-click a system to close in · Home to reset view</div>
 {/if}
 
 <style>
