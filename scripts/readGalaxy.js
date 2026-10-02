@@ -113,6 +113,14 @@ export async function readGalaxy(ES, { root, sprites }) {
           const category = node.children.find(c => c.tokens[0] === 'attributes')?.children.find(c => c.tokens[0] === 'category')?.tokens[1]
           if (category || !shipCategories.has(name)) shipCategories.set(name, category ?? null)
         }
+      } else if (type === 'planet mass' && name) {
+        // The masses moons orbit by (UniverseObjects.cpp), listed by sprite.
+        for (const child of node.children) {
+          const sprite = child.tokens[0]
+          const s = stars.get(sprite) ?? { sprite, icon: null, power: null, wind: null, mass: 0, habitable: 0 }
+          stars.set(sprite, s)
+          s.mass = num(name)
+        }
       } else if (type === 'star' && name) {
         const s = stars.get(name) ?? { sprite: name, icon: null, power: null, wind: null, mass: 0, habitable: 0 }
         stars.set(name, s)

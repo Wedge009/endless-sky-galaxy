@@ -1,5 +1,5 @@
 // Fetch any ref of the game's repository into a sparse, shallow check-out
-// holding only what the extractor reads: about 120 MB, against about 1 GB for
+// holding only what the extractor reads: about 200 MB, against about 1 GB for
 // a full clone.
 //
 // The check-out is kept and re-used, so moving to another ref fetches only
