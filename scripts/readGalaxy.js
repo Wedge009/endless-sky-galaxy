@@ -214,8 +214,18 @@ export async function readGalaxy(ES, { root, sprites }) {
     outStars[s.sprite] = { icon: await exportSprite(s.icon), power: s.power, wind: s.wind, mass: s.mass, habitable: s.habitable }
 
   // The sprites of every stellar object, for the system view: those in the
-  // definitions, and those events bring in (a bombed planet, say).
+  // definitions, and those events bring in (a bombed planet, say). Also every
+  // landscape and haze, below.
   const objectSprites = new Set(flatten([...systems.values()].flatMap(s => s.objects)).map(o => o.sprite).filter(Boolean))
+  // Each planet's landing pictures.
+  for (const p of planets.values()) for (const l of p.landscapes) objectSprites.add(l.sprite)
+  for (const node of allNodes)
+    if (node.tokens[0] === 'event')
+      for (const planet of node.children.filter(c => c.tokens[0] === 'planet'))
+        for (const l of planet.children.filter(c => c.tokens[0] === 'landscape' || (c.tokens[0] === 'add' && c.tokens[1] === 'landscape'))) {
+          l.tokens.slice(l.tokens[0] === 'landscape' ? 1 : 2).forEach(sprite => objectSprites.add(sprite))
+          l.children.forEach(c => objectSprites.add(c.tokens[0]))
+        }
   // And each system's background haze (StarField.cpp), "_menu/haze" if none.
   objectSprites.add('_menu/haze')
   for (const s of systems.values()) if (s.haze) objectSprites.add(s.haze)

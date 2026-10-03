@@ -1,5 +1,5 @@
 // Fetch any ref of the game's repository into a sparse, shallow check-out
-// holding only what the extractor reads: about 200 MB, against about 1 GB for
+// holding only what the extractor reads: about 300 MB, against about 1 GB for
 // a full clone.
 //
 // The check-out is kept and re-used, so moving to another ref fetches only
@@ -13,7 +13,7 @@ import { join } from 'node:path'
 export const UPSTREAM = 'https://github.com/endless-sky/endless-sky.git'
 
 /** Everything extract.js reads: the data files and the sprites it exports. */
-const SPARSE = ['data', 'images/map', 'images/label', 'images/ui', 'images/planet', 'images/star', 'images/_menu']
+const SPARSE = ['data', 'images/map', 'images/label', 'images/ui', 'images/planet', 'images/star', 'images/_menu', 'images/land']
 
 /**
  * @param {string} dir

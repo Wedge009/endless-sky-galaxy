@@ -157,6 +157,14 @@
             {/if}
           </summary>
           {#if planet}
+            {@const landscape = planet.landscapes[0] && galaxy.sprites[planet.landscapes[0].sprite]}
+            {#if landscape}
+              <!-- What the game shows on landing; it picks one if there are several. -->
+              <figure class="landscape">
+                <img src={landscape.url} alt="" loading="lazy" width={landscape.width} height={landscape.height} />
+                {#if planet.landscapes.length > 1}<figcaption>One of {planet.landscapes.length} seen on landing</figcaption>{/if}
+              </figure>
+            {/if}
             <dl class="facts">
               {#if planet.government && planet.government !== system.government}
                 <dt>Government</dt>
@@ -466,6 +474,23 @@
   .chip.inaccessible {
     color: var(--inaccessible);
     border-color: currentColor;
+  }
+
+  .landscape {
+    margin: 6px 0 8px;
+  }
+
+  .landscape img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 3px;
+  }
+
+  .landscape figcaption {
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--text-medium);
   }
 
   .planet {

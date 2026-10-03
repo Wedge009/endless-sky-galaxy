@@ -168,7 +168,7 @@ export function loadPlanet(planets, node) {
   const name = node.tokens[1]
   const existed = planets.has(name)
   const p = planets.get(name) ?? {
-    name, displayName: null, attributes: [], landscape: null, government: null,
+    name, displayName: null, attributes: [], landscapes: [], government: null,
     description: [], spaceport: [], port: null, shipyards: [], outfitters: [],
     security: null, bribe: null, tribute: null, requiredReputation: null, wormhole: null,
   }
@@ -186,7 +186,7 @@ export function loadPlanet(planets, node) {
     description: () => (p.description = []),
     spaceport: clearPort,
     port: clearPort,
-    landscape: () => (p.landscape = null),
+    landscape: () => (p.landscapes = []),
     government: () => (p.government = null),
     shipyard: () => (p.shipyards = []),
     outfitter: () => (p.outfitters = []),
@@ -198,7 +198,15 @@ export function loadPlanet(planets, node) {
     const remove = mode === 'remove'
     switch (key) {
       case 'display name': p.displayName = values[0]; break
-      case 'landscape': p.landscape = values[0]; break
+      // The pictures seen on landing; the game picks one by weight.
+      case 'landscape':
+        if (remove) p.landscapes = p.landscapes.filter((/** @type {any} */ l) => !values.includes(l.sprite))
+        else p.landscapes = [
+          ...p.landscapes,
+          ...values.map(sprite => ({ sprite, weight: 1 })),
+          ...child.children.map(c => ({ sprite: c.tokens[0], weight: c.tokens[1] === undefined ? 1 : num(c.tokens[1]) })),
+        ]
+        break
       case 'government': p.government = values[0]; break
       case 'security': p.security = num(values[0]); break
       case 'bribe': p.bribe = num(values[0]); break

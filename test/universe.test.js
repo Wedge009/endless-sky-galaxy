@@ -106,3 +106,10 @@ test('"remove object" with nothing beneath it removes them all', () => {
   const { systems } = load('system A\n\tobject\n\t\tsprite star/g0\n\tobject Earth\nsystem A\n\tremove object\n')
   assert.deepEqual(systems.get('A').objects, [])
 })
+
+test('landscapes: one or several, with weights, added to and removed', () => {
+  const { planets } = load('planet P\n\tlandscape land/a\nplanet P\n\tadd landscape land/b land/c\n\tadd landscape\n\t\tland/d 3\n\tremove landscape land/c\n')
+  assert.deepEqual(planets.get('P').landscapes, [{ sprite: 'land/a', weight: 1 }, { sprite: 'land/b', weight: 1 }, { sprite: 'land/d', weight: 3 }])
+  const replaced = load('planet P\n\tlandscape land/a\nplanet P\n\tlandscape land/z\n').planets.get('P')
+  assert.deepEqual(replaced.landscapes, [{ sprite: 'land/z', weight: 1 }])
+})

@@ -13,9 +13,11 @@ Asteroid belts are marked, and a wormhole says where it leads. Behind them is
 the system's background as the game draws it in flight: a field of stars,
 thinned out in sparse systems, and patches of the system's haze.
 
-A planet's outfitters and shipyards list what they sell, grouped as the game
-groups them, along with the ammunition every outfitter restocks. Click an item,
-or search for an outfit or ship, to see on the map everywhere it's sold.
+A planet's details start with its landing image, the picture the game shows
+when you land there. Its outfitters and shipyards list what they sell, grouped
+as the game groups them, along with the ammunition every outfitter restocks.
+Click an item, or search for an outfit or ship, to see on the map everywhere
+it's sold.
 
 It reads the game's data straight from a check-out, so it can show any version
 of the game, including development branches. It isn't bound by the game's
@@ -46,8 +48,8 @@ check-out to another branch or commit. The version it was extracted from is
 shown next to the title.
 
 You don't need a check-out of the game at all. Give a ref instead, and the
-extractor fetches just the files it needs from GitHub (about 200 MB, most of it
-planet and star images):
+extractor fetches just the files it needs from GitHub (about 300 MB, most of it
+planet, star and landing images):
 
 ```sh
 npm run extract -- --ref master           # a branch
