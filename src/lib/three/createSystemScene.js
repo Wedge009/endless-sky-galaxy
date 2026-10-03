@@ -72,8 +72,9 @@ export function createSystemScene(container, galaxy, system, events) {
         blending: sprite.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       }))
       mesh.scale.set(sprite.width, sprite.height, 1)
-      // Stars behind planets, planets behind their moons.
-      mesh.renderOrder = o.isStar ? 1 : 2 + (o.parent >= 0 ? 1 : 0)
+      // All in one layer, so three.js draws them furthest first: when the view
+      // is tilted, whatever is nearer the camera covers what's behind it.
+      mesh.renderOrder = 1
       scene.add(mesh)
     }
 
@@ -181,7 +182,7 @@ export function createSystemScene(container, galaxy, system, events) {
     })
   }
 
-  // --- Camera: everything in view, from above, a little tilted ---------------
+  // --- Camera: everything in view, looking straight down -----------------------
   const extent = Math.max(400, ...items.map(item => {
     let d = item.orbit.object.distance + item.radius
     for (let p = item.orbit.parent; p >= 0; p = orbits[p].parent) d += orbits[p].object.distance
@@ -190,7 +191,8 @@ export function createSystemScene(container, galaxy, system, events) {
   function resetView() {
     controls.target.set(0, 0, 0)
     const height = extent / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * 1.05
-    camera.position.set(0, height * 0.94, height * 0.34)
+    // As the galaxy view does: the sliver of +Z keeps north at the top.
+    camera.position.set(0, height, 0.01)
   }
   resetView()
 
