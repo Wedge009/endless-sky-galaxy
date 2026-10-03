@@ -8,24 +8,34 @@
   import StoryMenu from './lib/components/StoryMenu.svelte'
   import { applyEvents, eventsToApply } from './lib/data/applyEvents.js'
   import { compareGalaxies } from './lib/data/compareGalaxies.js'
+  import { defaultComparison } from './lib/data/versions.js'
   import { CHANGE_COLORS, systemColors } from './lib/utils/colors.js'
   import { load, save } from './lib/utils/persisted.js'
 
-  /** The galaxy as extracted: its base state, before any story event. @type {any} */
-  let base = $state.raw(null)
+  /** The versions stored (data/versions.json). @type {{ versions: import('./lib/data/versions.js').Version[], default: string } | null} */
+  let index = $state.raw(null)
   let error = $state('')
+  /** Each version's galaxy as extracted, once loaded. @type {Record<string, any>} */
+  let loaded = $state.raw({})
+  const loading = new Set()
 
-  fetch('data/galaxy.json')
-    .then(r => (r.ok ? r.json() : Promise.reject(new Error(`${r.status} ${r.statusText}`))))
-    .then(data => (base = data))
+  /** @param {Response} r */
+  const json = r => (r.ok ? r.json() : Promise.reject(new Error(`${r.status} ${r.statusText}`)))
+  fetch('data/versions.json')
+    .then(json)
+    .then(data => (index = data))
     .catch(e => (error = String(e.message ?? e)))
 
-  /** The version to show changes since, if one was extracted. @type {any} */
-  let compareBase = $state.raw(null)
-  fetch('data/compare.json')
-    .then(r => (r.ok ? r.json() : null))
-    .then(data => (compareBase = data))
-    .catch(() => {})
+  /** Fetch a version's galaxy, if it isn't already. @param {string} id */
+  function loadVersion(id) {
+    const version = index?.versions.find(v => v.id === id)
+    if (!version || loaded[id] || loading.has(id)) return
+    loading.add(id)
+    fetch(`data/${version.file}`)
+      .then(json)
+      .then(data => (loaded = { ...loaded, [id]: data }))
+      .catch(e => (error = String(e.message ?? e)))
+  }
 
   let settings = $state(
     load('settings', {
@@ -39,9 +49,58 @@
       storyEvents: true,
       /** @type {Record<string, string>} choice key -> chosen option */
       choices: {},
+      /** @type {string | null} the version last shown */
+      version: null,
+      /** The version to compare with: '' for the one before, or 'none'. */
+      compare: '',
     }),
   )
   $effect(() => save('settings', $state.snapshot(settings)))
+
+  // The version shown: the one in the address, else the one last shown, else
+  // the index's default (the newest stable release).
+  /** @type {string | null} */
+  let asked = $state(decodeURIComponent(location.hash.slice(1)) || null)
+  const stored = (/** @type {string | null} */ id) => !!id && !!index?.versions.some(v => v.id === id)
+  let shown = $derived(index && (stored(asked) ? asked : stored(settings.version) ? settings.version : index.default))
+  $effect(() => {
+    if (!shown) return
+    loadVersion(shown)
+    settings.version = shown
+    history.replaceState(null, '', `#${encodeURIComponent(shown)}`)
+  })
+  /** The version on screen: the one asked for once it's loaded, until then the last. @type {string | null} */
+  let current = $state(null)
+  $effect(() => {
+    if (shown && loaded[shown]) current = shown
+  })
+  /** The galaxy as extracted: its base state, before any story event. */
+  let base = $derived(current ? loaded[current] : null)
+
+  /** The version to show changes since. */
+  let compareId = $derived(!index || !current || settings.compare === 'none' ? null
+    : stored(settings.compare) && settings.compare !== current ? settings.compare
+    : defaultComparison(index.versions, current))
+  $effect(() => {
+    if (compareId) loadVersion(compareId)
+  })
+  let compareBase = $derived(compareId ? loaded[compareId] ?? null : null)
+
+  /** Where the map was looking, kept across a change of version. @type {any} */
+  let savedView = null
+  /** @param {string} id */
+  function chooseVersion(id) {
+    if (id === current) return
+    savedView = map?.getView() ?? null
+    asked = id
+  }
+
+  // A link to another version, followed from this page, changes only the
+  // address's hash, not the page.
+  function onHashChange() {
+    const id = decodeURIComponent(location.hash.slice(1))
+    if (id) chooseVersion(id)
+  }
 
   let options = $derived({
     hiddenSystems: settings.hiddenSystems,
@@ -127,21 +186,32 @@
   }
 
   let hoveredSystem = $derived(hovered ? systemsByName.get(hovered) : null)
+
+  // A new map after a change of version marks the selection again, if the
+  // system is still there.
+  $effect(() => {
+    if (!map || !galaxy) return
+    if (selected && !systemsByName.has(selected)) select(null, false)
+    else map.select(selected, false)
+  })
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydown={onKeydown} onhashchange={onHashChange} />
 
 {#if error}
   <div class="message">
     <h1>No galaxy data</h1>
-    <p>Couldn't load <code>data/galaxy.json</code> ({error}).</p>
-    <p>Extract it from an Endless Sky checkout first: <code>npm run extract -- /path/to/endless-sky</code></p>
+    <p>Couldn't load the extracted data ({error}).</p>
+    <p>Extract some versions of the game first, such as the last three stable releases: <code>npm run extract -- --releases 3</code></p>
   </div>
 {:else if !galaxy}
   <div class="message"><p>Loading the galaxy…</p></div>
 {:else}
+  <!-- A new version can have other systems, so it gets a new map, looking where the last one was. -->
+  {#key current}
   <GalaxyMap
     {galaxy}
+    initialView={savedView}
     {colors}
     {options}
     changes={changeOverlay}
@@ -152,6 +222,7 @@
     onHover={(/** @type {string | null} */ name) => (hovered = name)}
     onViewChange={(/** @type {number[]} */ c) => (center = c)}
   />
+  {/key}
 
   {#if viewing && selected && systemsByName.get(selected)}
     {#key selected}
@@ -173,9 +244,17 @@
   <div class="toolbar" class:hidden={viewing}>
     <div class="panel title">
       <h1>Endless Sky Galaxy</h1>
-      <span class="version" title="{galaxy.source.path} ({galaxy.source.branch}, {galaxy.source.date})">
-        {galaxy.source.describe ?? 'unknown version'}
-      </span>
+      <select
+        class="version"
+        value={current}
+        onchange={e => chooseVersion((/** @type {HTMLSelectElement} */ (e.target)).value)}
+        aria-label="Version of the game"
+        title="{galaxy.source.path} ({galaxy.source.branch}, {galaxy.source.date?.slice(0, 10)})"
+      >
+        {#each index?.versions ?? [] as v (v.id)}
+          <option value={v.id}>{v.id}{v.stable ? '' : ` (${v.kind === 'local' ? 'local' : 'development'})`}</option>
+        {/each}
+      </select>
     </div>
 
     <Search {galaxy} onSelectSystem={(/** @type {string} */ name) => select(name, true)} onFindItem={findItem} />
@@ -186,7 +265,7 @@
       <option value="icons">Star icons</option>
       <option value="visibility">Map visibility</option>
       <option value="events" disabled={!settings.storyEvents}>Changed by story events</option>
-      {#if compareBase}<option value="changes">Changed since {compareBase.source.describe}</option>{/if}
+      {#if compareBase}<option value="changes">Changed since {compareId}</option>{/if}
       {#if settings.mode.startsWith('sells:')}
         <option value={settings.mode}>Where to buy {settings.mode.split(':').slice(2).join(':')}</option>
       {/if}
@@ -197,10 +276,12 @@
       </optgroup>
     </select>
 
-    {#if changes}
+    {#if (index?.versions.length ?? 0) > 1}
       <ChangesMenu
         {changes}
-        version={previous.source.describe}
+        version={compareId}
+        versions={index?.versions.filter(v => v.id !== current) ?? []}
+        onPickVersion={(/** @type {string} */ id) => (settings.compare = id)}
         onShow={() => (settings.mode = 'changes')}
         onSelectSystem={(/** @type {string} */ name) => select(name, true)}
       />
@@ -226,7 +307,7 @@
     </div>
   </div>
 
-  {#if !viewing}<Legend {galaxy} {mode} {center} compareVersion={previous?.source.describe} />{/if}
+  {#if !viewing}<Legend {galaxy} {mode} {center} compareVersion={compareId} />{/if}
 
   {#if !viewing && hoveredSystem && hoveredSystem.name !== selected}
     <div class="panel hover">
@@ -242,7 +323,7 @@
         system={systemsByName.get(selected)}
         planets={planetsByName}
         change={changes?.systems.get(selected)}
-        compareVersion={previous?.source.describe}
+        compareVersion={compareId}
         onFindItem={findItem}
         {viewing}
         {focusPlanet}
@@ -290,6 +371,10 @@
   .version {
     font-size: 12px;
     color: var(--text-medium);
+    background: transparent;
+    border: none;
+    padding: 0 2px;
+    cursor: pointer;
   }
 
   .hidden {

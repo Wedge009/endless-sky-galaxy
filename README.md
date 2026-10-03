@@ -41,44 +41,51 @@ switched off under *View*.
 
 ```sh
 npm install
-npm run extract -- /path/to/endless-sky   # ../endless-sky by default, or $ES_PATH
+npm run extract -- --releases 3   # the last three stable releases
 npm run dev
 ```
 
-`npm run extract` writes `public/data/galaxy.json` and copies the sprites it
-needs into `public/sprites/` (both git-ignored). Re-run it after switching the
-check-out to another branch or commit. The version it was extracted from is
-shown next to the title.
+The extractor stores each version of the game it reads in its own file in
+`public/data/versions/`, listed in `public/data/versions.json`, and the
+sprites they use in `public/sprites/` (all git-ignored). The menu by the title
+switches between them, and the address names the one shown (`#v0.11.2`), so a
+link opens it.
 
-You don't need a check-out of the game at all. Give a ref instead, and the
-extractor fetches just the files it needs from GitHub (about 300 MB, most of it
-planet, star and landing images):
+`--releases N` keeps exactly the newest N stable releases, as GitHub marks them
+(not pre-releases), adding any that are missing and removing older ones. It
+needs no check-out of the game: it fetches just the files it needs from GitHub
+(about 300 MB, most of it planet, star and landing images) into a sparse,
+shallow check-out in `.cache/endless-sky/` (git-ignored), re-used so another
+version only fetches what changed. A version already stored at the same commit
+isn't extracted again, unless `--force` is given.
+
+Other versions can be added alongside, to follow development, and stay until
+removed:
 
 ```sh
 npm run extract -- --ref master           # a branch
-npm run extract -- --ref v0.11.3          # a release tag
+npm run extract -- --ref v0.11.3          # a pre-release
 npm run extract -- --ref pull/12766/head  # a pull request
 npm run extract -- --ref my-branch --repo https://github.com/someone/endless-sky.git
+npm run extract -- /path/to/endless-sky   # a local check-out (../endless-sky by default, or $ES_PATH)
+npm run extract -- --remove master
+npm run extract -- --list
 ```
 
-The sparse, shallow check-out is kept in `.cache/endless-sky/` (git-ignored)
-and re-used, so moving to another ref only fetches what changed. The
-repository is upstream unless `--repo` names a fork.
+Sprites are shared by the versions, named by their content so that an image
+changed in one version doesn't replace it in another. Any no stored version
+uses are removed.
 
 ### What's changed since another version
 
-The extractor also reads a second version to compare against: the latest
-release, or for a release, the one before it. *Since <version>* then lists
-the systems that are new, removed or changed, and can colour the map by them,
-with removed systems and links drawn as red ghosts and new links in green. A
+*Since <version>* compares the version shown with another stored one: by
+default the stable release before it, or for anything else, the newest stable
+release. Any other stored version can be picked instead, or none. It lists the
+systems that are new, removed or changed, and can colour the map by them, with
+removed systems and links drawn as red ghosts and new links in green. A
 system's panel says what changed: its government, links, planets, services,
 prices and so on. Both versions are compared after their story events, with
-the same story choices. Pick another version, or none:
-
-```sh
-npm run extract -- --ref master --compare v0.10.0
-npm run extract -- --compare none
-```
+the same story choices.
 
 Systems and planets are matched by name, so a renamed one shows as removed
 and added.
@@ -107,8 +114,9 @@ and added.
   extractor uses it to read the data files, and the viewer to apply events,
   since events go through the same loading code as the definitions. The
   viewer is sent the events' changes already parsed.
-- `scripts/readGalaxy.js` reads one check-out; `scripts/extract.js` fetches
-  and reads the version shown and the one compared against.
+- `scripts/readGalaxy.js` reads one check-out; `scripts/extract.js` fetches,
+  reads and stores versions, and `src/lib/data/versions.js` decides which are
+  stable, shown and compared.
   `src/lib/data/compareGalaxies.js` works out what changed between them.
 - `src/lib/data/orbits.js` places a system's objects on a date, and
   `src/lib/three/createSystemScene.js` draws them, over the background from

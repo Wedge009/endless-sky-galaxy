@@ -3,7 +3,8 @@
 // anything, and the events that change what the viewer shows, classified by
 // scripts/events.js as assumed to have happened or hanging on a story choice.
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import sharp from 'sharp'
 import { parseDataFile } from './dataFile.js'
@@ -170,6 +171,27 @@ export async function readGalaxy(ES, { root, sprites }) {
   /** @type {Map<string, any>} */
   const spriteCache = new Map()
 
+  /** @type {Map<string, string> | null} "hash.ext" -> URL of every sprite already stored */
+  let stored = null
+  function storedByHash() {
+    if (stored) return stored
+    stored = new Map()
+    /** @param {string} dir */
+    const scan = dir => {
+      if (!existsSync(dir)) return
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const path = join(dir, entry.name)
+        if (entry.isDirectory()) scan(path)
+        else {
+          const m = entry.name.match(/\.([0-9a-f]{8})\.(\w+)$/)
+          if (m) stored.set(`${m[1]}.${m[2]}`, relative(join(root, 'public'), path).split('\\').join('/'))
+        }
+      }
+    }
+    scan(join(root, 'public', 'sprites'))
+    return stored
+  }
+
   /** @param {string | null} name */
   async function exportSprite(name) {
     if (!name || !sprites) return null
@@ -189,12 +211,19 @@ export async function readGalaxy(ES, { root, sprites }) {
 
     const source = join(dir, pick.file)
     // Copied as they are, not re-encoded: the viewer zooms in much further than
-    // the game, so any detail lost to compression shows.
-    const url = `sprites/${name.replace(/[^\w/-]+/g, '_')}.${pick.m.ext}`
-    const dest = join(root, 'public', url)
-    mkdirSync(dirname(dest), { recursive: true })
-    if (!existsSync(dest) || statSync(dest).mtimeMs < statSync(source).mtimeMs) {
-      copyFileSync(source, dest)
+    // the game, so any detail lost to compression shows. Named by content as
+    // well, so versions of the game share an image until it changes, and each
+    // keeps its own once it does.
+    const hash = createHash('sha1').update(readFileSync(source)).digest('hex').slice(0, 8)
+    // The same image under another name (the Milky Way moved from map/ to ui/
+    // between versions) is stored once.
+    let url = storedByHash().get(`${hash}.${pick.m.ext}`)
+    if (!url) {
+      url = `sprites/${name.replace(/[^\w/-]+/g, '_')}.${hash}.${pick.m.ext}`
+      const dest = join(root, 'public', url)
+      mkdirSync(dirname(dest), { recursive: true })
+      if (!existsSync(dest)) copyFileSync(source, dest)
+      storedByHash().set(`${hash}.${pick.m.ext}`, url)
     }
     const meta = await sharp(source, { limitInputPixels: false }).metadata()
     const scale = pick.m.is2x ? 0.5 : 1

@@ -615,6 +615,17 @@ export function createGalaxyScene(container, galaxy, events) {
     resetView() {
       flyTo(start, homeOffset.clone())
     },
+    /** Where the camera is, to carry over to another map. */
+    getView() {
+      return { target: controls.target.toArray(), position: camera.position.toArray() }
+    },
+    /** @param {{ target: number[], position: number[] }} view */
+    setView(view) {
+      flight = null
+      controls.target.fromArray(view.target)
+      camera.position.fromArray(view.position)
+      controls.update()
+    },
     dispose() {
       cancelAnimationFrame(frame)
       resizeObserver.disconnect()

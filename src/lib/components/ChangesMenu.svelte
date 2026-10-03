@@ -1,12 +1,14 @@
 <script>
-  // What's changed since another version of the game: the systems added,
-  // removed or changed, to jump to, and a way to see them on the map.
-  let { changes, version, onShow, onSelectSystem } = $props()
+  // What's changed since another stored version of the game, which can be
+  // picked: the systems added, removed or changed, to jump to, and a way to
+  // see them on the map. `changes` is null while comparing with nothing, or
+  // until the other version has loaded.
+  let { changes, version, versions, onPickVersion, onShow, onSelectSystem } = $props()
 
   let open = $state(false)
 
   /** @param {'added' | 'removed' | 'changed' | 'reworded'} status */
-  const systemsWith = status => [...changes.systems.values()]
+  const systemsWith = status => [...(changes?.systems.values() ?? [])]
     .filter(c => c.status === status)
     .sort((a, b) => a.name.localeCompare(b.name))
 
@@ -16,7 +18,7 @@
     { title: 'Changed systems', status: 'changed', list: systemsWith('changed') },
     { title: 'Descriptions rewritten only', status: 'reworded', list: systemsWith('reworded') },
   ])
-  let { counts } = $derived(changes)
+  let counts = $derived(changes?.counts ?? {})
   let nothing = $derived(!counts.added && !counts.removed && !counts.changed && !counts.reworded && !counts.addedLinks && !counts.removedLinks && !counts.shops)
 
   /** A few words on what changed in a system. @param {any} c */
@@ -27,10 +29,21 @@
 </script>
 
 <div class="changes">
-  <button onclick={() => (open = !open)} aria-expanded={open}>Since {version} ▾</button>
+  <button onclick={() => (open = !open)} aria-expanded={open}>{version ? `Since ${version}` : 'Changes'} ▾</button>
   {#if open}
     <div class="panel menu">
-      {#if nothing}
+      <label class="pick">
+        Changes since
+        <select value={version ?? 'none'} onchange={e => onPickVersion((/** @type {HTMLSelectElement} */ (e.target)).value)}>
+          {#each versions as v (v.id)}<option value={v.id}>{v.id}</option>{/each}
+          <option value="none">nothing (don't compare)</option>
+        </select>
+      </label>
+      {#if !version}
+        <p class="muted">Pick a version to see what's changed since.</p>
+      {:else if !changes}
+        <p class="muted">Loading {version}…</p>
+      {:else if nothing}
         <p class="muted">Nothing on the map has changed since {version}.</p>
       {:else}
         <p class="summary">
@@ -97,6 +110,12 @@
 
   p {
     margin: 0;
+  }
+
+  .pick {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   h3 {

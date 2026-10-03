@@ -83,3 +83,23 @@ export function releaseTags(repo = UPSTREAM) {
       return y[0] - x[0] || y[1] - x[1] || y[2] - x[2]
     })
 }
+
+/**
+ * The repository's releases as GitHub lists them, with which are marked as
+ * pre-releases, or null for a repository that isn't on GitHub or can't be
+ * reached.
+ * @param {string} [repo]
+ * @returns {Promise<{ tag_name: string, prerelease: boolean, draft: boolean }[] | null>}
+ */
+export async function githubReleases(repo = UPSTREAM) {
+  const m = repo.match(/github\.com[/:]([^/]+)\/([^/]+?)(?:\.git)?\/?$/)
+  if (!m) return null
+  try {
+    const response = await fetch(`https://api.github.com/repos/${m[1]}/${m[2]}/releases?per_page=100`, {
+      headers: { Accept: 'application/vnd.github+json' },
+    })
+    return response.ok ? await response.json() : null
+  } catch {
+    return null
+  }
+}
