@@ -113,3 +113,9 @@ test('landscapes: one or several, with weights, added to and removed', () => {
   const replaced = load('planet P\n\tlandscape land/a\nplanet P\n\tlandscape land/z\n').planets.get('P')
   assert.deepEqual(replaced.landscapes, [{ sprite: 'land/z', weight: 1 }])
 })
+
+test('objects can carry hazards of their own', () => {
+  const { systems } = load('system A\n\tobject\n\t\tsprite star/black-hole-core\n\t\thazard "Event Horizon" 1\n\thazard Storm 9000\n')
+  assert.deepEqual(systems.get('A').objects[0].hazards, [{ name: 'Event Horizon', period: 1 }])
+  assert.deepEqual(systems.get('A').hazards, [{ name: 'Storm', period: 9000 }])
+})

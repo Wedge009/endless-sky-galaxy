@@ -182,6 +182,13 @@
     text-align: center;
   }
 
+  :global(.hazard-label) {
+    font: 11px var(--font);
+    white-space: nowrap;
+    opacity: 0.85;
+    text-shadow: 0 0 3px #000;
+  }
+
   :global(.belt-name) {
     color: rgba(150, 125, 90, 0.8);
     font: 11px var(--font);

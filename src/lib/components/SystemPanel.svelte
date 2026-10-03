@@ -1,5 +1,6 @@
 <script>
   import Stock from './Stock.svelte'
+  import { describeHazard, hazardsOf, objectKind } from '../utils/hazards.js'
   import { css, governmentColor, starClass, valueColor, visibilityOf } from '../utils/colors.js'
 
   let { galaxy, system, planets, change = null, compareVersion = null, viewing = false, focusPlanet = null, onSelectSystem, onFindItem, onEnter, onClose } = $props()
@@ -35,6 +36,9 @@
       }),
   )
   let visibility = $derived(visibilityOf(system))
+  /** What an object is called, for saying where a hazard is centred. @param {any} o */
+  const objectName = o => (o.name ? (planets.get(o.name)?.displayName ?? o.name) : objectKind(o))
+  let hazards = $derived(hazardsOf(system).map(hazard => ({ hazard, about: describeHazard(galaxy, hazard, objectName) })))
   /** The story events that changed this system or its planets, in the order applied. */
   let storyEvents = $derived(
     [...(galaxy.changedBy?.get(system.name) ?? [])]
@@ -279,10 +283,24 @@
       </section>
     {/if}
 
-    {#if system.fleets.length || system.minables.length || system.hazards.length}
+    {#if hazards.length}
+      <section>
+        <h3>Hazards</h3>
+        <ul class="hazards">
+          {#each hazards as { hazard, about }, i (i)}
+            <li>
+              <span class="hazard-name" class:always={about.always}>{hazard.name}</span>
+              <div class="muted">{about.where}, {about.when}{about.effects.length ? `: ${about.effects.join(', ')}` : ''}.</div>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
+
+    {#if system.fleets.length || system.minables.length}
       <section>
         <details>
-          <summary><h3>Fleets, minables and hazards</h3></summary>
+          <summary><h3>Fleets and minables</h3></summary>
           <dl class="facts">
             {#if system.fleets.length}
               <dt>Fleets</dt>
@@ -291,10 +309,6 @@
             {#if system.minables.length}
               <dt>Minables</dt>
               <dd>{system.minables.map((/** @type {any} */ m) => m.name).join(', ')}</dd>
-            {/if}
-            {#if system.hazards.length}
-              <dt>Hazards</dt>
-              <dd>{system.hazards.map((/** @type {any} */ h) => h.name).join(', ')}</dd>
             {/if}
           </dl>
         </details>
@@ -326,6 +340,23 @@
 
   .removed {
     color: rgb(255 110 100);
+  }
+
+  .hazards {
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  .hazards li {
+    margin: 3px 0;
+  }
+
+  .hazard-name {
+    color: rgb(255 170 90);
+  }
+
+  .hazard-name.always {
+    color: rgb(255 120 100);
   }
 
   .events {

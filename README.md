@@ -9,9 +9,12 @@ facilities, trade prices and links.
 *Enter system* opens a view of the system itself: its stars, planets, moons
 and stations on their orbits, worked out as the game does, on any date from
 the day a new game starts, and played forwards at up to 1000 days a second.
-Asteroid belts are marked, and a wormhole says where it leads. Behind them is
-the system's background as the game draws it in flight: a field of stars,
-thinned out in sparse systems, and patches of the system's haze.
+Asteroid belts are marked, and a wormhole says where it leads. The system's
+panel lists its hazards, such as the Ember Waste's storms: where each applies,
+how often it comes and what it does. Those with a limited range, such as a
+black hole's pull, are shaded over the area they cover. Behind it all is the
+system's background as the game draws it in flight: a field of stars, thinned
+out in sparse systems, and patches of the system's haze.
 
 A planet's details start with its landing image, the picture the game shows
 when you land there. Its outfitters and shipyards list what they sell, grouped
@@ -123,8 +126,8 @@ npm test
 
 runs the tests of the data logic with Node's own test runner: the data-file
 parser, loading and merging definitions as the game does, sprite file names,
-orbits, sorting events into assumed ones and story choices, applying them, and
-comparing versions. They use small samples of game data written into the
+orbits, hazards, sorting events into assumed ones and story choices, applying
+them, and comparing versions. They use small samples of game data written into the
 tests, so they need no check-out.
 
 ## Licence and credits

@@ -48,13 +48,15 @@ export function loadObject(node) {
   const name = node.tokens[node.tokens[0] === 'add' || node.tokens[0] === 'remove' ? 2 : 1] ?? null
   // A period of 0 means none was given, and the game works it out from the
   // masses involved (System::FinishLoading; see orbits.js).
-  const object = { name, sprite: null, distance: 0, period: 0, offset: 0, children: [] }
+  // Hazards an object carries are centred on it (a black hole's event horizon).
+  const object = { name, sprite: null, distance: 0, period: 0, offset: 0, hazards: [], children: [] }
   for (const child of node.children) {
     const [key, value] = child.tokens
     if (key === 'sprite') object.sprite = value
     else if (key === 'distance') object.distance = num(value)
     else if (key === 'period') object.period = num(value)
     else if (key === 'offset') object.offset = num(value)
+    else if (key === 'hazard' && value) object.hazards.push({ name: value, period: num(child.tokens[2] ?? '1') })
     else if (key === 'object') object.children.push(loadObject(child))
   }
   return object

@@ -9,6 +9,7 @@ import { MapControls } from 'three/examples/jsm/controls/MapControls.js'
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js'
 import { orbitsOf, positionsOn } from '../data/orbits.js'
 import { createBackground } from './createBackground.js'
+import { describeHazard, hazardsOf, objectKind } from '../utils/hazards.js'
 
 const PICK_RADIUS_PX = 10
 // Planets are small beside their orbits (Earth is 180 across, 966 from the
@@ -158,6 +159,62 @@ export function createSystemScene(container, galaxy, system, events) {
     scene.add(label)
   }
 
+  // --- Hazards: the area each covers, around the system's centre or the object
+  // carrying it. Those always active are shaded red; occasional weather, a
+  // fainter orange with a dashed edge. System-wide ones cover everything, so
+  // they're only listed in the panel.
+  /** @type {{ group: THREE.Group, index: number }[]} */
+  const hazardAreas = []
+  /** @type {{ label: CSS2DObject, outer: number, home: THREE.Vector3 }[]} */
+  const hazardLabels = []
+  /** How many labels each centre has so far, to fan them out around it. */
+  const labelsAround = new Map()
+  for (const hazard of hazardsOf(system)) {
+    const about = describeHazard(galaxy, hazard, o => o.name ?? objectKind(o))
+    if (about.systemWide) continue
+    const nth = labelsAround.get(hazard.object) ?? 0
+    labelsAround.set(hazard.object, nth + 1)
+    const [inner, outer] = about.range
+    const colour = about.always ? 0xff5a46 : 0xffa04a
+    const group = new THREE.Group()
+    const area = new THREE.Mesh(
+      new THREE.RingGeometry(inner, outer, 128),
+      new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: about.always ? 0.1 : 0.06, depthWrite: false, side: THREE.DoubleSide }),
+    )
+    area.rotation.x = -Math.PI / 2
+    area.position.y = -2
+    group.add(area)
+    const edge = []
+    for (let i = 0; i <= 128; i++) {
+      const a = (i / 128) * Math.PI * 2
+      edge.push(new THREE.Vector3(Math.cos(a) * outer, -1.5, Math.sin(a) * outer))
+    }
+    const outline = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(edge),
+      about.always
+        ? new THREE.LineBasicMaterial({ color: colour, transparent: true, opacity: 0.5, depthWrite: false })
+        : new THREE.LineDashedMaterial({ color: colour, transparent: true, opacity: 0.5, depthWrite: false, dashSize: outer / 30, gapSize: outer / 40 }),
+    )
+    outline.computeLineDistances()
+    outline.renderOrder = 2
+    group.add(outline)
+    const el = document.createElement('div')
+    el.className = 'hazard-label'
+    el.style.color = `#${colour.toString(16)}`
+    el.textContent = hazard.name
+    const label = new CSS2DObject(el)
+    // On its edge, starting from the bottom: where several share a centre,
+    // each goes a little further round, so they fan out.
+    const angle = Math.PI / 2 + nth * 0.5
+    label.position.set(Math.cos(angle) * outer, 0, Math.sin(angle) * outer)
+    label.center.set(0.5, -0.3)
+    hazardLabels.push({ label, outer, home: label.position.clone() })
+    group.add(label)
+    scene.add(group)
+    // Centred on an object, it moves with it.
+    hazardAreas.push({ group, index: hazard.object ? orbits.findIndex(o => o.object === hazard.object) : -1 })
+  }
+
   // --- Placing everything on a date -----------------------------------------
   let days = 0
   /** @type {number[][]} */
@@ -183,7 +240,54 @@ export function createSystemScene(container, galaxy, system, events) {
         item.ring.position.set(parent[0], -1, parent[1])
       }
     })
+    for (const { group, index } of hazardAreas) {
+      const [x, y] = index >= 0 ? positions[index] : [0, 0]
+      group.position.set(x, 0, y)
+    }
     fitSprites()
+  }
+
+  /**
+   * Place hazard labels so they read: each on its area's edge, slid along the
+   * screen's edge while its centre is in view and its edge isn't, and hidden
+   * where it would overlap one already placed, the largest areas' first. A
+   * hidden one comes back as the view closes in and they separate.
+   */
+  const byArea = [...hazardLabels].sort((a, b) => b.outer - a.outer)
+  const where = new THREE.Vector3()
+  const centre = new THREE.Vector3()
+  const ray = new THREE.Raycaster()
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0)
+  function spaceHazardLabels() {
+    const width = container.clientWidth
+    const height = container.clientHeight
+    /** @type {number[][]} */
+    const placed = []
+    for (const { label, home } of byArea) {
+      const group = /** @type {THREE.Object3D} */ (label.parent)
+      label.position.copy(home)
+      const w = label.element.offsetWidth || 120
+      const h = label.element.offsetHeight || 14
+      where.copy(home).add(group.position).project(camera)
+      let x = (where.x + 1) / 2 * width
+      let y = (1 - where.y) / 2 * height
+      const inView = where.z < 1 && x > w / 2 && x < width - w / 2 && y > 0 && y < height - 2 * h
+      centre.copy(group.position).project(camera)
+      const centreInView = centre.z < 1 && Math.abs(centre.x) < 1 && Math.abs(centre.y) < 1
+      if (!inView && centreInView && where.z < 1) {
+        // Slide it to the edge of the screen, and put it there on the plane.
+        x = Math.min(width - w / 2 - 4, Math.max(w / 2 + 4, x))
+        y = Math.min(height - 2 * h - 24, Math.max(4, y))
+        ray.setFromCamera(new THREE.Vector2(x / width * 2 - 1, 1 - y / height * 2), camera)
+        const hit = ray.ray.intersectPlane(plane, new THREE.Vector3())
+        if (hit) label.position.copy(hit).sub(group.position)
+      }
+      // Its box, as label.center places it: centred across, just below the point.
+      const box = [x - w / 2, y + 0.3 * h, x + w / 2, y + 1.3 * h]
+      const shown = where.z < 1 && (inView || centreInView) && placed.every(p => box[2] < p[0] || box[0] > p[2] || box[3] < p[1] || box[1] > p[3])
+      label.visible = shown
+      if (shown) placed.push(box)
+    }
   }
 
   /** Grow sprites too small to see to the minimum size, and keep names below them. */
@@ -308,6 +412,7 @@ export function createSystemScene(container, galaxy, system, events) {
     last = now
     controls.update()
     fitSprites()
+    spaceHazardLabels()
     renderer.clear()
     if (showBackground) drawBackground()
     renderer.render(scene, camera)

@@ -55,6 +55,7 @@ export async function readGalaxy(ES, { root, sprites }) {
   /** @type {[string, string][]} variant -> base ship */ const variants = []
   /** @type {Record<string, string[]>} the order the game lists categories in (categories.txt) */ const categoryOrder = {}
   /** @type {number[] | null} day, month, year a new game starts on (starts.txt) */ let startDate = null
+  /** @type {Map<string, any>} hazards as Hazard::Load reads them, with its defaults */ const hazards = new Map()
   /** Whether every outfitter restocks every ammunition (the Default preset in gamerules.txt). */
   let universalRestocking = true
   const duplicates = []
@@ -100,6 +101,21 @@ export async function readGalaxy(ES, { root, sprites }) {
           else if (key === 'link') w.links.push([values[0], values[1]])
           else if (key === 'color') pendingColors.push(() => (w.color = colorOf(values)))
         }
+      } else if (type === 'hazard' && name) {
+        const h = { range: [0, 10000], systemWide: false, duration: [1, 1], constant: false, effects: false, damage: /** @type {Record<string, number>} */ ({}) }
+        for (const child of node.children) {
+          const [key, a, b] = child.tokens
+          if (key === 'system-wide') h.systemWide = true
+          else if (key === 'constant strength') h.constant = true
+          else if (key === 'environmental effect') h.effects = true
+          else if (key === 'duration' && a) h.duration = [num(a), Math.max(num(a), b === undefined ? 0 : num(b))]
+          else if (key === 'range' && a) h.range = b === undefined ? [0, num(a)] : [num(a), Math.max(num(a), num(b))]
+          else if (key === 'weapon')
+            // What it does, from its weapon: the kinds of damage, negative for a gain.
+            for (const w of child.children)
+              if ((w.tokens[0].endsWith(' damage') || w.tokens[0] === 'hit force') && w.tokens[1] !== undefined) h.damage[w.tokens[0]] = num(w.tokens[1])
+        }
+        hazards.set(name, h)
       } else if (type === 'gamerules' || (type === 'gamerules preset' && name === 'Default')) {
         const rule = node.children.find(c => c.tokens[0] === 'universal ammo restocking')
         if (rule) universalRestocking = rule.tokens[1] !== 'false' && rule.tokens[1] !== '0'
@@ -290,6 +306,7 @@ export async function readGalaxy(ES, { root, sprites }) {
         .flatMap(o => o.items))].sort(),
     },
     shipyards: Object.fromEntries(shipyards),
+    hazards: Object.fromEntries(hazards),
     // What each item sold is, for grouping a shop's stock.
     categories: {
       outfits: Object.fromEntries(outfitCategories),
