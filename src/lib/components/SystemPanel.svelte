@@ -11,8 +11,14 @@
   /** Every named object in the system, nested moons included. @param {any[]} objects @returns {any[]} */
   const named = objects => objects.flatMap(o => [...(o.name ? [o] : []), ...named(o.children)])
 
-  let stellarObjects = $derived(named(system.objects).map(o => ({ object: o, planet: planets.get(o.name) })))
-  let unnamedCount = $derived(countAll(system.objects) - stellarObjects.length - system.stars.length)
+  let namedObjects = $derived(named(system.objects))
+  // A planet built from several objects (a ringworld's segments) is listed once, by its first.
+  let stellarObjects = $derived(
+    namedObjects
+      .filter((o, i) => namedObjects.findIndex(x => x.name === o.name) === i)
+      .map(o => ({ object: o, planet: planets.get(o.name) })),
+  )
+  let unnamedCount = $derived(countAll(system.objects) - namedObjects.length - system.stars.length)
   let links = $derived(
     galaxy.links
       .filter((/** @type {string[]} */ l) => l.includes(system.name))

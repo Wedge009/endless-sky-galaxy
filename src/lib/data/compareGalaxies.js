@@ -81,8 +81,8 @@ export function compareGalaxies(current, previous) {
       .map(c => `${c} ${old.trade[c] ?? 'none'} → ${s.trade[c] ?? 'none'}`)
     if (prices.length) changes.push({ what: 'Prices', items: prices })
 
-    // Planets by the named objects in each version of the system.
-    const named = (/** @type {any} */ sys) => flatten(sys.objects).map(o => o.name).filter(Boolean)
+    // Planets by the named objects in each version of the system, once each (a ringworld is several objects).
+    const named = (/** @type {any} */ sys) => [...new Set(flatten(sys.objects).map(o => o.name).filter(Boolean))]
     const was = named(old)
     const now = named(s)
     compareList('Planets and stations', was, now)
