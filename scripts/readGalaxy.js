@@ -16,6 +16,15 @@ import { applyEvents, eventsToApply } from '../src/lib/data/applyEvents.js'
 
 /** @typedef {import('./dataFile.js').DataNode} DataNode */
 
+/** Images only the system view uses are re-encoded above this size (1.25 MiB). */
+const SHRINK_OVER = 1.25 * 1024 * 1024
+/**
+ * As AVIF, which keeps transparency: quality 80 with full colour detail
+ * (4:4:4) took Gossamer's smoke ring from 5.4 to 0.5 MiB and Betelgeuse's star
+ * from 1.8 to 0.14 MiB, at 48 and 46 dB PSNR, smoothing only a little grain.
+ */
+const SHRINK_AS = { quality: 80, chromaSubsampling: '4:4:4' }
+
 /**
  * @param {string} ES  the check-out
  * @param {{ root: string, sprites: boolean }} options  `root` is this project, for
@@ -193,9 +202,16 @@ export async function readGalaxy(ES, { root, sprites }) {
   }
 
   /** @param {string | null} name */
-  async function exportSprite(name) {
+  /**
+   * @param {string | null} name
+   * @param {{ shrink?: boolean }} [options]  `shrink`: an image only the system
+   *   view uses (one system's star, a planet, a landing image) may be
+   *   re-encoded for size if it's large; see SHRINK_OVER.
+   */
+  async function exportSprite(name, { shrink = false } = {}) {
     if (!name || !sprites) return null
-    if (spriteCache.has(name)) return spriteCache.get(name)
+    const key = `${name}\u0000${shrink}`
+    if (spriteCache.has(key)) return spriteCache.get(key)
     const dir = join(ES, 'images', dirname(name))
     const base = name.split('/').at(-1)
     const candidates = existsSync(dir)
@@ -205,7 +221,7 @@ export async function readGalaxy(ES, { root, sprites }) {
     candidates.sort((a, b) => Number(a.m?.is2x) - Number(b.m?.is2x) || (a.m?.frame ?? 0) - (b.m?.frame ?? 0))
     const pick = candidates[0]
     if (!pick || !pick.m) {
-      spriteCache.set(name, null)
+      spriteCache.set(key, null)
       return null
     }
 
@@ -214,16 +230,25 @@ export async function readGalaxy(ES, { root, sprites }) {
     // the game, so any detail lost to compression shows. Named by content as
     // well, so versions of the game share an image until it changes, and each
     // keeps its own once it does.
-    const hash = createHash('sha1').update(readFileSync(source)).digest('hex').slice(0, 8)
+    const content = readFileSync(source)
+    const hash = createHash('sha1').update(content).digest('hex').slice(0, 8)
+    // The exception: a large image only one system shows (Gossamer's 5 MiB
+    // smoke ring) is re-encoded, at full size, so entering that system isn't
+    // slow. The galaxy's own images always stay as they are.
+    const reencode = shrink && content.length > SHRINK_OVER
+    const ext = reencode ? 'avif' : pick.m.ext
     // The same image under another name (the Milky Way moved from map/ to ui/
     // between versions) is stored once.
-    let url = storedByHash().get(`${hash}.${pick.m.ext}`)
+    let url = storedByHash().get(`${hash}.${ext}`)
     if (!url) {
-      url = `sprites/${name.replace(/[^\w/-]+/g, '_')}.${hash}.${pick.m.ext}`
+      url = `sprites/${name.replace(/[^\w/-]+/g, '_')}.${hash}.${ext}`
       const dest = join(root, 'public', url)
       mkdirSync(dirname(dest), { recursive: true })
-      if (!existsSync(dest)) copyFileSync(source, dest)
-      storedByHash().set(`${hash}.${pick.m.ext}`, url)
+      if (!existsSync(dest)) {
+        if (reencode) await sharp(source, { limitInputPixels: false }).avif(SHRINK_AS).toFile(dest)
+        else copyFileSync(source, dest)
+      }
+      storedByHash().set(`${hash}.${ext}`, url)
     }
     const meta = await sharp(source, { limitInputPixels: false }).metadata()
     const scale = pick.m.is2x ? 0.5 : 1
@@ -233,7 +258,7 @@ export async function readGalaxy(ES, { root, sprites }) {
       height: (meta.height ?? 0) * scale,
       additive: ['+', '^', '~'].includes(pick.m.blend),
     }
-    spriteCache.set(name, sprite)
+    spriteCache.set(key, sprite)
     return sprite
   }
 
@@ -283,7 +308,7 @@ export async function readGalaxy(ES, { root, sprites }) {
   /** @type {Record<string, any>} */
   const outSprites = {}
   for (const name of [...objectSprites].sort()) {
-    const sprite = await exportSprite(name)
+    const sprite = await exportSprite(name, { shrink: true })
     if (sprite) outSprites[name] = sprite
   }
 
