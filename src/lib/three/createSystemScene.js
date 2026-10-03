@@ -71,6 +71,20 @@ export function createSystemScene(container, galaxy, system, events) {
         depthWrite: false,
         blending: sprite.additive ? THREE.AdditiveBlending : THREE.NormalBlending,
       }))
+      // An invisible copy of each solid body marks where it's solid in the
+      // depth buffer, so the parts of orbits behind it are hidden and those in
+      // front still show. The visible sprite keeps its soft edges. Stars are
+      // glows, which shouldn't hide anything, so they have none.
+      if (!o.isStar) {
+        const occluder = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: texture,
+          alphaTest: 0.5,
+          colorWrite: false,
+          depthWrite: true,
+        }))
+        occluder.renderOrder = 1
+        mesh.add(occluder)
+      }
       mesh.scale.set(sprite.width, sprite.height, 1)
       // All in one layer, so three.js draws them furthest first: when the view
       // is tilted, whatever is nearer the camera covers what's behind it.
@@ -90,6 +104,8 @@ export function createSystemScene(container, galaxy, system, events) {
         new THREE.BufferGeometry().setFromPoints(points),
         new THREE.LineBasicMaterial({ color: o.isStar ? 0x554433 : 0x333333, transparent: true, depthWrite: false }),
       )
+      // After the bodies, so their depth decides which parts show.
+      ring.renderOrder = 2
       scene.add(ring)
     }
 
@@ -131,6 +147,7 @@ export function createSystemScene(container, galaxy, system, events) {
       new THREE.LineDashedMaterial({ color: 0x6e5a3c, dashSize: radius / 40, gapSize: radius / 60, transparent: true, depthWrite: false }),
     )
     belt.computeLineDistances()
+    belt.renderOrder = 2
     scene.add(belt)
     const el = document.createElement('div')
     el.className = 'belt-name'
@@ -154,7 +171,12 @@ export function createSystemScene(container, galaxy, system, events) {
       if (item.mesh) {
         item.mesh.position.set(x, 0, y)
         // The game turns each object to face along its orbit (System::SetDate).
-        if (x || y) /** @type {THREE.SpriteMaterial} */ (item.mesh.material).rotation = -Math.atan2(x, -y)
+        if (x || y) {
+          const rotation = -Math.atan2(x, -y)
+          for (const sprite of /** @type {THREE.Sprite[]} */ ([item.mesh, ...item.mesh.children])) {
+            sprite.material.rotation = rotation
+          }
+        }
       }
       if (item.ring) {
         const parent = item.orbit.parent >= 0 ? positions[item.orbit.parent] : [0, 0]
