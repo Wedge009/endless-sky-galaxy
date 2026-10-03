@@ -74,12 +74,14 @@ export function createSystemScene(container, galaxy, system, events) {
       }))
       // An invisible copy of each solid body marks where it's solid in the
       // depth buffer, so the parts of orbits behind it are hidden and those in
-      // front still show. The visible sprite keeps its soft edges. Stars are
-      // glows, which shouldn't hide anything, so they have none.
-      if (!o.isStar) {
+      // front still show. The visible sprite keeps its soft edges. A star's
+      // disc is opaque to its limb and its glow fainter, so a stricter cut-off
+      // leaves the glow out. Additive sprites (black holes, novas) have no alpha
+      // to go by; the cores drawn with them are what hide orbits.
+      if (!sprite.additive) {
         const occluder = new THREE.Sprite(new THREE.SpriteMaterial({
           map: texture,
-          alphaTest: 0.5,
+          alphaTest: o.isStar ? 0.9 : 0.5,
           colorWrite: false,
           depthWrite: true,
         }))
