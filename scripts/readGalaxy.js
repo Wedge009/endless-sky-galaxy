@@ -9,6 +9,7 @@ import { dirname, join, relative } from 'node:path'
 import sharp from 'sharp'
 import { parseDataFile } from './dataFile.js'
 import { parseImageFile } from './sprites.js'
+import { TILE_OVER, tileSet, writeTiles } from './tiles.js'
 import { analyseEvents } from './events.js'
 import { choiceLabels } from './eventChoices.js'
 import { finishGalaxy, flatten, loadPlanet, loadShop, loadSystem } from '../src/lib/data/universe.js'
@@ -201,16 +202,17 @@ export async function readGalaxy(ES, { root, sprites }) {
     return stored
   }
 
-  /** @param {string | null} name */
   /**
    * @param {string | null} name
-   * @param {{ shrink?: boolean }} [options]  `shrink`: an image only the system
-   *   view uses (one system's star, a planet, a landing image) may be
-   *   re-encoded for size if it's large; see SHRINK_OVER.
+   * @param {{ shrink?: boolean, tile?: boolean }} [options]  `shrink`: an image
+   *   only the system view uses (one system's star, a planet, a landing image)
+   *   may be re-encoded for size if it's large; see SHRINK_OVER. `tile`: a
+   *   large JPEG is split into tiles, losslessly, with an overview; see
+   *   scripts/tiles.js.
    */
-  async function exportSprite(name, { shrink = false } = {}) {
+  async function exportSprite(name, { shrink = false, tile = false } = {}) {
     if (!name || !sprites) return null
-    const key = `${name}\u0000${shrink}`
+    const key = `${name}\u0000${shrink}\u0000${tile}`
     if (spriteCache.has(key)) return spriteCache.get(key)
     const dir = join(ES, 'images', dirname(name))
     const base = name.split('/').at(-1)
@@ -232,6 +234,36 @@ export async function readGalaxy(ES, { root, sprites }) {
     // keeps its own once it does.
     const content = readFileSync(source)
     const hash = createHash('sha1').update(content).digest('hex').slice(0, 8)
+    const meta = await sharp(source, { limitInputPixels: false }).metadata()
+    const scale = pick.m.is2x ? 0.5 : 1
+    const width = (meta.width ?? 0) * scale
+    const height = (meta.height ?? 0) * scale
+    const additive = ['+', '^', '~'].includes(pick.m.blend)
+
+    // The Milky Way is tiled, still with every original pixel, so the map
+    // doesn't wait for all 13 MB of it. Stored by content alone, so a version
+    // that moves the image shares it.
+    if (tile && meta.format === 'jpeg' && Math.max(meta.width ?? 0, meta.height ?? 0) > TILE_OVER) {
+      const base = `sprites/tiles/${hash}`
+      const set = tileSet(meta.width ?? 0, meta.height ?? 0)
+      const dir = join(root, 'public', base)
+      if (!existsSync(dir)) await writeTiles(source, dir, set)
+      const sprite = {
+        url: `${base}/${set.overview.file}`,
+        width,
+        height,
+        additive,
+        tiles: {
+          width: meta.width,
+          height: meta.height,
+          overviewWidth: set.overview.width,
+          list: set.tiles.map(t => ({ url: `${base}/${t.file}`, crop: t.crop, core: t.core })),
+        },
+      }
+      spriteCache.set(key, sprite)
+      return sprite
+    }
+
     // The exception: a large image only one system shows (Gossamer's 5 MiB
     // smoke ring) is re-encoded, at full size, so entering that system isn't
     // slow. The galaxy's own images always stay as they are.
@@ -250,14 +282,7 @@ export async function readGalaxy(ES, { root, sprites }) {
       }
       storedByHash().set(`${hash}.${ext}`, url)
     }
-    const meta = await sharp(source, { limitInputPixels: false }).metadata()
-    const scale = pick.m.is2x ? 0.5 : 1
-    const sprite = {
-      url,
-      width: (meta.width ?? 0) * scale,
-      height: (meta.height ?? 0) * scale,
-      additive: ['+', '^', '~'].includes(pick.m.blend),
-    }
+    const sprite = { url, width, height, additive }
     spriteCache.set(key, sprite)
     return sprite
   }
@@ -275,7 +300,7 @@ export async function readGalaxy(ES, { root, sprites }) {
       sprite = `label/${g.name.slice(6)}`
       fromEvent = true
     }
-    const exported = await exportSprite(sprite)
+    const exported = await exportSprite(sprite, { tile: !g.name.startsWith('label ') })
     if (exported) outGalaxies.push({ name: g.name, pos: g.pos, sprite: exported, fromEvent })
   }
 

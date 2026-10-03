@@ -76,6 +76,12 @@ Sprites are shared by the versions, named by their content so that an image
 changed in one version doesn't replace it in another. Any no stored version
 uses are removed.
 
+The Milky Way back-drop, a 4096-pixel JPEG of 9-13 MB, is split into 512-pixel
+tiles that the map fetches only when zoomed in far enough to need them, over
+the small view it opens with. The tiles are cut with `jpegtran`, which keeps
+every pixel of the original, so it must be installed for extracting (Debian
+and Ubuntu: `libjpeg-turbo-progs`).
+
 ### What's changed since another version
 
 *Since <version>* compares the version shown with another stored one: by

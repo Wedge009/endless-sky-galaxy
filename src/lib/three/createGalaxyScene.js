@@ -19,6 +19,10 @@ const LINK_OFFSET = 7
 const NAME_DISTANCE = 1100
 const NAME_FADE = 300
 const PICK_RADIUS_PX = 12
+// A tile of the Milky Way fades in over this long once loaded, and is freed
+// once it hasn't been needed for TILE_KEEP_MS.
+const TILE_FADE_MS = 250
+const TILE_KEEP_MS = 30000
 
 const ringVertex = /* glsl */ `
   attribute vec3 color;
@@ -114,6 +118,8 @@ export function createGalaxyScene(container, galaxy, events) {
   const loader = new THREE.TextureLoader()
   /** @type {THREE.Mesh[]} */ const backdrops = []
   /** @type {THREE.Mesh[]} */ const regionLabels = []
+  /** @type {{ mesh: THREE.Mesh, url: string, box: THREE.Box3, density: number, loading: boolean, shownAt: number, neededAt: number }[]} */
+  const tiles = []
   for (const g of galaxy.galaxies) {
     const texture = loader.load(g.sprite.url)
     texture.colorSpace = THREE.SRGBColorSpace
@@ -133,6 +139,46 @@ export function createGalaxyScene(container, galaxy, events) {
     plane.userData = { fromEvent: g.fromEvent }
     scene.add(plane)
     ;(isLabel ? regionLabels : backdrops).push(plane)
+    if (g.sprite.tiles) addTiles(plane, g.sprite)
+  }
+
+  /**
+   * Lay a tiled image's full-resolution tiles (scripts/tiles.js) over its
+   * overview, each drawing only its own area and reaching into the overlap
+   * with its neighbours just for filtering, so the joins don't show. They're
+   * loaded as they're needed, by updateTiles.
+   * @param {THREE.Mesh} plane @param {any} sprite
+   */
+  function addTiles(plane, sprite) {
+    const { width, height, overviewWidth, list } = sprite.tiles
+    const sx = sprite.width / width
+    const sy = sprite.height / height
+    plane.updateMatrixWorld(true)
+    for (const tile of list) {
+      const [cx, cy, cw, ch] = tile.crop
+      const [left, top, right, bottom] = tile.core
+      const geometry = new THREE.PlaneGeometry((right - left) * sx, (bottom - top) * sy)
+      const uv = /** @type {THREE.BufferAttribute} */ (geometry.getAttribute('uv'))
+      for (let i = 0; i < uv.count; i++)
+        uv.setXY(i, (left + uv.getX(i) * (right - left)) / cw, 1 - (top + (1 - uv.getY(i)) * (bottom - top)) / ch)
+      const material = new THREE.MeshBasicMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: /** @type {THREE.MeshBasicMaterial} */ (plane.material).blending,
+        opacity: 0,
+      })
+      const mesh = new THREE.Mesh(geometry, material)
+      mesh.position.set((cx + (left + right) / 2 - width / 2) * sx, (height / 2 - cy - (top + bottom) / 2) * sy, 0)
+      mesh.renderOrder = 0.5
+      mesh.visible = false
+      plane.add(mesh)
+      mesh.updateMatrixWorld(true)
+      geometry.computeBoundingBox()
+      const box = /** @type {THREE.Box3} */ (geometry.boundingBox).clone().applyMatrix4(mesh.matrixWorld)
+      // The overview's texels per world unit: past this many screen pixels
+      // per world unit, it's magnified and soft, so the tile is needed.
+      tiles.push({ mesh, url: tile.url, box, density: overviewWidth / sprite.width, loading: false, shownAt: 0, neededAt: 0 })
+    }
   }
 
   // --- Hyperspace links -----------------------------------------------------
@@ -462,6 +508,50 @@ export function createGalaxyScene(container, galaxy, events) {
   resizeObserver.observe(container)
   resize()
 
+  const frustum = new THREE.Frustum()
+  const viewProjection = new THREE.Matrix4()
+  let disposed = false
+  /**
+   * Load the full-resolution tiles on screen where the overview would be
+   * magnified, fade each in as it arrives, and free those not needed for a
+   * while. The overview still shows beneath while a tile loads.
+   * @param {number} now
+   */
+  function updateTiles(now) {
+    if (!tiles.length) return
+    camera.updateMatrixWorld()
+    viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse)
+    frustum.setFromProjectionMatrix(viewProjection)
+    for (const tile of tiles) {
+      const material = /** @type {THREE.MeshBasicMaterial} */ (tile.mesh.material)
+      const needed = /** @type {THREE.Object3D} */ (tile.mesh.parent).visible
+        && frustum.intersectsBox(tile.box)
+        && ringUniforms.uScale.value > tile.density * tile.box.distanceToPoint(camera.position)
+      if (needed) {
+        tile.neededAt = now
+        if (!material.map && !tile.loading) {
+          tile.loading = true
+          loader.load(tile.url, texture => {
+            tile.loading = false
+            if (disposed) return texture.dispose()
+            texture.colorSpace = THREE.SRGBColorSpace
+            texture.anisotropy = renderer.capabilities.getMaxAnisotropy()
+            material.map = texture
+            material.needsUpdate = true
+            tile.mesh.visible = true
+            tile.shownAt = performance.now()
+          }, undefined, () => (tile.loading = false))
+        }
+      } else if (material.map && now - tile.neededAt > TILE_KEEP_MS) {
+        material.map.dispose()
+        material.map = null
+        material.needsUpdate = true
+        tile.mesh.visible = false
+      }
+      if (material.map) material.opacity = Math.min(1, (now - tile.shownAt) / TILE_FADE_MS)
+    }
+  }
+
   let lastCenter = ''
   let frame = 0
   /** While a system view covers the map, there's no need to draw it. */
@@ -479,6 +569,7 @@ export function createGalaxyScene(container, galaxy, events) {
       if (t >= 1) flight = null
     }
     controls.update()
+    updateTiles(now)
 
     nameLayer.visible = showNames
     if (showNames) {
@@ -627,6 +718,7 @@ export function createGalaxyScene(container, galaxy, events) {
       controls.update()
     },
     dispose() {
+      disposed = true
       cancelAnimationFrame(frame)
       resizeObserver.disconnect()
       controls.dispose()
