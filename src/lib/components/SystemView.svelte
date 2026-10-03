@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { createSystemScene } from '../three/createSystemScene.js'
   import { dateFromDays, daysSinceEpoch } from '../data/orbits.js'
 
@@ -8,7 +8,9 @@
   let { galaxy, system, selectedPlanet, panelOpen = true, onSelectPlanet, onShowPanel, onClose } = $props()
 
   const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
-  const start = galaxy.startDate ?? [16, 11, 3013]
+  // The view is made once, from the galaxy it opens with: entering another
+  // system makes a new one.
+  const start = untrack(() => galaxy.startDate) ?? [16, 11, 3013]
   const startDays = daysSinceEpoch(start[0], start[1], start[2])
   const SPEEDS = [1, 10, 100, 1000]
 

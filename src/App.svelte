@@ -86,8 +86,12 @@
   })
   let compareBase = $derived(compareId ? loaded[compareId] ?? null : null)
 
-  /** Where the map was looking, kept across a change of version. @type {any} */
-  let savedView = null
+  /**
+   * Where the map was looking, kept across a change of version. Only a new
+   * map reads it, as it starts.
+   * @type {any}
+   */
+  let savedView = $state.raw(null)
   /** @param {string} id */
   function chooseVersion(id) {
     if (id === current) return
