@@ -140,6 +140,11 @@ export function createBackground(galaxy, renderer) {
   // --- Haze ---------------------------------------------------------------------
   /** @type {{ x: number, y: number, angle: number }[]} */
   let haze = []
+  /** The view's centre at the last frame, and the background's own centre. */
+  /** @type {number[] | null} */
+  let lastCentre = null
+  /** @type {number[]} */
+  let centreSoFar = [0, 0]
   /** @type {THREE.Mesh[]} */
   const hazePool = []
   /** @type {THREE.MeshBasicMaterial | null} */
@@ -154,6 +159,7 @@ export function createBackground(galaxy, renderer) {
    * @param {any} system
    */
   function setSystem(system) {
+    lastCentre = null
     starUniforms.uDensity.value = system.starfieldDensity ?? 1
     const next = random(hash(system.name))
     haze = []
@@ -183,18 +189,30 @@ export function createBackground(galaxy, renderer) {
   }
 
   /**
-   * Draw it for a view centred on `center` (map units), at `zoom` screen
+   * Draw it for a view centred on `viewCentre` (map units), at `zoom` screen
    * pixels per map unit, turned by `angle` radians.
-   * @param {number[]} center @param {number} zoom @param {number} angle
+   * @param {number[]} viewCentre @param {number} zoom @param {number} angle
    * @param {number} width @param {number} height  in CSS pixels
    */
-  function render(center, zoom, angle, width, height) {
+  function render(viewCentre, zoom, angle, width, height) {
     camera.left = -width / 2
     camera.right = width / 2
     camera.top = height / 2
     camera.bottom = -height / 2
     camera.updateProjectionMatrix()
     const base = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom))
+
+    // Where the background is centred moves with the view, scaled so that on
+    // screen it always moves at the game's parallax beside the system, even
+    // where its own zoom is held in the game's range. Zooming doesn't move it.
+    if (!lastCentre) centreSoFar = [...viewCentre]
+    else {
+      const scale = zoom / base
+      centreSoFar[0] += (viewCentre[0] - lastCentre[0]) * scale
+      centreSoFar[1] += (viewCentre[1] - lastCentre[1]) * scale
+    }
+    lastCentre = [...viewCentre]
+    const center = centreSoFar
 
     starUniforms.uCenter.value.set(center[0], center[1])
     starUniforms.uZoom.value = base * STAR_ZOOM
