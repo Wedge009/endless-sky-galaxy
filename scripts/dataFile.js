@@ -42,9 +42,19 @@ function tokenize(text) {
  * @returns {DataNode[]}
  */
 export function parseDataFile(path) {
-  const lines = readFileSync(path, 'utf8').split('\n')
+  return parseData(readFileSync(path, 'utf8'), path)
+}
+
+/**
+ * Parse data-file text, as from a file named `file`.
+ * @param {string} text
+ * @param {string} [file]
+ * @returns {DataNode[]}
+ */
+export function parseData(text, file = '') {
+  const lines = text.split('\n')
   /** @type {DataNode} */
-  const root = { tokens: [], children: [], file: path, line: 0 }
+  const root = { tokens: [], children: [], file, line: 0 }
   /** @type {{ indent: number, node: DataNode }[]} */
   const stack = [{ indent: -1, node: root }]
 
@@ -57,7 +67,7 @@ export function parseDataFile(path) {
 
     while (stack[stack.length - 1].indent >= indent) stack.pop()
     /** @type {DataNode} */
-    const node = { tokens, children: [], file: path, line: index + 1 }
+    const node = { tokens, children: [], file, line: index + 1 }
     stack[stack.length - 1].node.children.push(node)
     stack.push({ indent, node })
   })

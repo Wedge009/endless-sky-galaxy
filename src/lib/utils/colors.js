@@ -79,11 +79,13 @@ export function systemsSelling(galaxy, mode) {
   const [, kind, ...rest] = mode.split(':')
   const item = rest.join(':')
   const table = kind === 'ship' ? galaxy.shipyards : galaxy.outfitters
+  // Ammunition every outfitter restocks is sold wherever there's an outfitter.
+  const everywhere = kind === 'outfit' && galaxy.restock?.items.includes(item)
   const sold = new Set()
   for (const p of galaxy.planets) {
     if (!p.system) continue
     const shops = kind === 'ship' ? p.shipyards : p.outfitters
-    if (shops.some((/** @type {string} */ shop) => table[shop]?.items.includes(item))) sold.add(p.system)
+    if ((everywhere && shops.length) || shops.some((/** @type {string} */ shop) => table[shop]?.items.includes(item))) sold.add(p.system)
   }
   return sold
 }

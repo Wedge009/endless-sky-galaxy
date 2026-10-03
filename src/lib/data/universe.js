@@ -13,24 +13,30 @@
 const num = (/** @type {string} */ s) => Number.parseFloat(s)
 
 /**
- * Walk a node's children, splitting off any "add"/"remove" prefix and
- * clearing a key's previous values on its first plain occurrence.
+ * Walk a node's children, splitting off any "add"/"remove" prefix, and clear
+ * a key's earlier values where the game does (System::Load, Planet::Load):
+ * - "remove <key>" with no value clears any key ("remove object" only when no
+ *   object to match is given beneath it);
+ * - a key in `overwrite`, given plainly, replaces its earlier values the first
+ *   time it appears in this definition. Other keys add to what's there.
  * @param {DataNode} node
- * @param {any} target
  * @param {Record<string, () => void>} clear  key -> how to clear it
+ * @param {string[][]} overwrite  groups of keys that replace earlier values,
+ *   as one (a planet's "port" and "spaceport")
  * @param {(key: string, values: string[], child: DataNode, mode: '' | 'add' | 'remove') => void} handle
  */
-function loadChildren(node, target, clear, handle) {
-  const cleared = new Set()
+function loadChildren(node, clear, overwrite, handle) {
+  const pending = new Set(overwrite.flat())
   for (const child of node.children) {
     const mode = child.tokens[0] === 'add' || child.tokens[0] === 'remove' ? child.tokens[0] : ''
     const key = child.tokens[mode ? 1 : 0]
     const values = child.tokens.slice(mode ? 2 : 1)
     if (key === undefined) continue
-    if (clear[key] && ((mode === 'remove' && !values.length) || (!mode && !cleared.has(key)))) {
-      clear[key]()
-      cleared.add(key)
-      if (mode === 'remove') continue
+    const removeAll = mode === 'remove' && !values.length && !(key === 'object' && child.children.length)
+    if (removeAll || (!mode && pending.has(key))) {
+      clear[key]?.()
+      for (const group of overwrite) if (group.includes(key)) group.forEach(k => pending.delete(k))
+      if (removeAll) continue
     }
     handle(key, values, child, mode)
   }
@@ -90,21 +96,25 @@ export function loadSystem(systems, node) {
     jumpRange: null, belt: [], haze: null, starfieldDensity: 1, objects: [], trade: {}, fleets: [], minables: [], hazards: [],
   }
   systems.set(name, s)
-  loadChildren(node, s, {
+  loadChildren(node, {
     'display name': () => (s.displayName = null),
     government: () => (s.government = null),
     attributes: () => (s.attributes = []),
     link: () => (s.links = []),
     trade: () => (s.trade = {}),
     fleet: () => (s.fleets = []),
+    asteroids: () => (s.minables = []),
     minables: () => (s.minables = []),
     hazard: () => (s.hazards = []),
     belt: () => (s.belt = []),
     object: () => (s.objects = []),
+    haze: () => (s.haze = null),
+    'jump range': () => (s.jumpRange = null),
+    'starfield density': () => (s.starfieldDensity = 1),
     hidden: () => (s.hidden = false),
     shrouded: () => (s.shrouded = false),
     inaccessible: () => (s.inaccessible = false),
-  }, (key, values, child, mode) => {
+  }, [['asteroids', 'minables'], ['attributes'], ['belt'], ['fleet'], ['link'], ['object'], ['hazard']], (key, values, child, mode) => {
     const remove = mode === 'remove'
     const without = (/** @type {any[]} */ list, /** @type {(x: any) => boolean} */ match) => list.filter(x => !match(x))
     switch (key) {
@@ -165,15 +175,26 @@ export function loadPlanet(planets, node) {
   planets.set(name, p)
   /** @param {DataNode} child */
   const paragraph = child => ({ text: child.tokens.at(-1), conditional: child.children.some(c => c.tokens[0] === 'to') })
-  loadChildren(node, p, {
+  // In the game a spaceport and a port are the same thing (Port).
+  const clearPort = () => {
+    p.spaceport = []
+    p.port = null
+  }
+  loadChildren(node, {
+    'display name': () => (p.displayName = null),
     attributes: () => (p.attributes = []),
     description: () => (p.description = []),
-    spaceport: () => (p.spaceport = []),
-    port: () => (p.port = null),
+    spaceport: clearPort,
+    port: clearPort,
+    landscape: () => (p.landscape = null),
+    government: () => (p.government = null),
     shipyard: () => (p.shipyards = []),
     outfitter: () => (p.outfitters = []),
+    'required reputation': () => (p.requiredReputation = null),
+    bribe: () => (p.bribe = null),
+    security: () => (p.security = null),
     tribute: () => (p.tribute = null),
-  }, (key, values, child, mode) => {
+  }, [['attributes'], ['description'], ['spaceport', 'port'], ['landscape']], (key, values, child, mode) => {
     const remove = mode === 'remove'
     switch (key) {
       case 'display name': p.displayName = values[0]; break
@@ -230,7 +251,7 @@ export function loadPlanet(planets, node) {
  */
 export function loadShop(shops, node) {
   const name = node.tokens[1]
-  const shop = shops.get(name) ?? { name, items: [], anywhere: false }
+  const shop = shops.get(name) ?? { name, items: [], anywhere: false, location: [] }
   shops.set(name, shop)
   let overwriteStock = shop.items.length > 0
   /** @param {DataNode} child */
@@ -244,7 +265,10 @@ export function loadShop(shops, node) {
   for (const child of node.children) {
     const mode = child.tokens[0] === 'add' || child.tokens[0] === 'remove' ? child.tokens[0] : ''
     const key = child.tokens[mode ? 1 : 0]
-    if (key === 'location' || (key === 'to' && child.tokens[mode ? 2 : 1] === 'sell')) shop.anywhere = mode !== 'remove'
+    if (key === 'location' || (key === 'to' && child.tokens[mode ? 2 : 1] === 'sell')) {
+      shop.anywhere = mode !== 'remove'
+      if (key === 'location') shop.location = mode === 'remove' ? [] : child.children.map(c => c.tokens)
+    }
     else if (key === 'stock') {
       if (mode !== 'add' && overwriteStock) {
         overwriteStock = false

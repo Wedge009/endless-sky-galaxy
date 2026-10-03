@@ -7,6 +7,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node
 import { dirname, join, relative } from 'node:path'
 import sharp from 'sharp'
 import { parseDataFile } from './dataFile.js'
+import { parseImageFile } from './sprites.js'
 import { analyseEvents } from './events.js'
 import { choiceLabels } from './eventChoices.js'
 import { finishGalaxy, flatten, loadPlanet, loadShop, loadSystem } from '../src/lib/data/universe.js'
@@ -54,6 +55,8 @@ export async function readGalaxy(ES, { root, sprites }) {
   /** @type {[string, string][]} variant -> base ship */ const variants = []
   /** @type {Record<string, string[]>} the order the game lists categories in (categories.txt) */ const categoryOrder = {}
   /** @type {number[] | null} day, month, year a new game starts on (starts.txt) */ let startDate = null
+  /** Whether every outfitter restocks every ammunition (the Default preset in gamerules.txt). */
+  let universalRestocking = true
   const duplicates = []
 
   /** @param {string[]} values @returns {number[] | null} */
@@ -97,6 +100,9 @@ export async function readGalaxy(ES, { root, sprites }) {
           else if (key === 'link') w.links.push([values[0], values[1]])
           else if (key === 'color') pendingColors.push(() => (w.color = colorOf(values)))
         }
+      } else if (type === 'gamerules' || (type === 'gamerules preset' && name === 'Default')) {
+        const rule = node.children.find(c => c.tokens[0] === 'universal ammo restocking')
+        if (rule) universalRestocking = rule.tokens[1] !== 'false' && rule.tokens[1] !== '0'
       } else if (type === 'start' && name === 'default') {
         const date = node.children.find(c => c.tokens[0] === 'date')
         if (date) startDate = date.tokens.slice(1, 4).map(Number)
@@ -143,36 +149,8 @@ export async function readGalaxy(ES, { root, sprites }) {
   pendingColors.forEach(resolveColor => resolveColor())
 
   // ---------------------------------------------------------------------------
-  // Sprites. A sprite name like "label/core" refers to an image file such as
-  // images/label/core+.png. As ImageFileData reads a file name: "@2x" marks a
-  // high-DPI variant and "@sw" a swizzle mask (not an image); then trailing
-  // digits are a frame number only when a blend mark comes before them ('-'
-  // normal, '+' additive, '^' or '~' half-additive, '=' pre-multiplied), and a
-  // blend mark alone means frame 0. So "g0" is a star sprite, not frame 0 of
-  // "g". The first frame of an animation is used.
+  // Sprites, copied into public/sprites/ as the viewer needs them.
 
-  const IMAGE = /\.(png|jpe?g|webp|avif)$/i
-  const BLEND = new Set(['-', '^', '+', '=', '~'])
-  /** @param {string} file */
-  function parseImageFile(file) {
-    const ext = file.match(IMAGE)?.[1]
-    if (!ext) return null
-    let name = file.slice(0, -ext.length - 1)
-    let is2x = false
-    if (name.endsWith('@2x')) [name, is2x] = [name.slice(0, -3), true]
-    if (name.endsWith('@1x')) name = name.slice(0, -3)
-    if (name.endsWith('@sw')) return null
-    let at = name.length
-    while (at > 0 && /\d/.test(name[at - 1])) at--
-    let blend = ''
-    let frame = 0
-    if (at > 0 && BLEND.has(name[at - 1])) {
-      blend = name[at - 1]
-      frame = Number(name.slice(at)) || 0
-      name = name.slice(0, at - 1)
-    }
-    return { name, ext: ext.toLowerCase(), is2x, blend, frame }
-  }
   /** @type {Map<string, any>} */
   const spriteCache = new Map()
 
@@ -292,6 +270,15 @@ export async function readGalaxy(ES, { root, sprites }) {
     planets: finished.planets,
     wormholes: [...wormholes.values()],
     outfitters: Object.fromEntries(outfitters),
+    // Ammunition every outfitter sells, from the shops whose location is any
+    // planet with an outfitter (the "... Restock" ones). They sell to whoever
+    // carries a launcher for it, or to anyone under the default game rule.
+    restock: {
+      universal: universalRestocking,
+      items: [...new Set([...outfitters.values()]
+        .filter(o => o.anywhere && JSON.stringify(o.location) === JSON.stringify([['attributes', 'outfitter']]))
+        .flatMap(o => o.items))].sort(),
+    },
     shipyards: Object.fromEntries(shipyards),
     // What each item sold is, for grouping a shop's stock.
     categories: {

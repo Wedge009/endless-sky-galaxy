@@ -176,6 +176,20 @@
     cursor: pointer;
   }
 
+  :global(.object-name .leads) {
+    font-size: 11px;
+    color: rgba(190, 140, 255, 0.9);
+    text-align: center;
+  }
+
+  :global(.belt-name) {
+    color: rgba(150, 125, 90, 0.8);
+    font: 11px var(--font);
+    font-style: italic;
+    white-space: nowrap;
+    text-shadow: 0 0 3px #000;
+  }
+
   :global(.object-name.selected) {
     color: #fff;
     font-weight: 500;

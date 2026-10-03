@@ -18,11 +18,21 @@
         if (!list.includes(item)) byCategory.set(category, [...list, item])
       }
     const rank = (/** @type {string} */ c) => (order.includes(c) ? order.indexOf(c) : order.length)
-    return [...byCategory]
+    const sorted = [...byCategory]
       .sort(([a], [b]) => rank(a) - rank(b) || a.localeCompare(b))
-      .map(([category, items]) => ({ category, items: items.sort() }))
+      .map(([category, items]) => ({ category, items: items.sort(), note: '' }))
+    // Every outfitter also restocks ammunition (the "... Restock" shops), for
+    // launchers the player carries, or for anyone under the default game rule.
+    const restock = !isShips && shops.length ? galaxy.restock?.items ?? [] : []
+    if (restock.length)
+      sorted.push({
+        category: 'Ammunition restocked',
+        items: restock,
+        note: galaxy.restock.universal ? 'Sold at every outfitter' : 'Sold at every outfitter to those carrying a launcher for it',
+      })
+    return sorted
   })
-  let count = $derived(groups.reduce((n, g) => n + g.items.length, 0))
+  let count = $derived(groups.filter(g => !g.note).reduce((n, g) => n + g.items.length, 0))
 </script>
 
 <details class="stock">
@@ -30,8 +40,8 @@
     {count} {isShips ? (count === 1 ? 'ship' : 'ships') : count === 1 ? 'outfit' : 'outfits'}
     <span class="muted">· {shops.join(', ')}</span>
   </summary>
-  {#each groups as { category, items } (category)}
-    <div class="category">{category}</div>
+  {#each groups as { category, items, note } (category)}
+    <div class="category" title={note}>{category}</div>
     <div class="items">
       {#each items as item (item)}
         <button onclick={() => onFindItem(kind, item)} title="Where else is it sold?">{item}</button>

@@ -22,6 +22,7 @@
   function itemsSold(type, shops) {
     const listed = new Set(galaxy.planets.flatMap((/** @type {any} */ p) => (type === 'ship' ? p.shipyards : p.outfitters)))
     const items = new Set([...listed].flatMap(shop => shops[shop]?.items ?? []))
+    if (type === 'outfit') for (const item of galaxy.restock?.items ?? []) items.add(item)
     return [...items].map(item => ({ label: item, system: null, item: type, kind: type === 'ship' ? 'ship for sale' : 'outfit for sale' }))
   }
 

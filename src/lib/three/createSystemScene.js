@@ -99,6 +99,15 @@ export function createSystemScene(container, galaxy, system, events) {
       const el = document.createElement('div')
       el.className = 'object-name'
       el.textContent = planets.get(name)?.displayName ?? name
+      // A wormhole says where it leads from here.
+      const wormhole = galaxy.wormholes.find((/** @type {any} */ w) => w.name === planets.get(name)?.wormhole)
+      const leads = wormhole?.links.filter((/** @type {string[]} */ l) => l[0] === system.name).map((/** @type {string[]} */ l) => l[1]) ?? []
+      if (leads.length) {
+        const to = document.createElement('div')
+        to.className = 'leads'
+        to.textContent = `→ ${leads.join(', ')}`
+        el.append(to)
+      }
       el.addEventListener('click', () => events.onSelect(name))
       label = new CSS2DObject(el)
       label.center.set(0.5, -0.4)
@@ -107,6 +116,29 @@ export function createSystemScene(container, galaxy, system, events) {
     const radius = sprite ? Math.max(sprite.width, sprite.height) / 2 : 0
     return { orbit: o, mesh, ring, label, radius }
   })
+
+  // --- Asteroid belts: where the system's minable asteroids are (System::Load,
+  // "belt"), as dashed rings around the centre.
+  for (const radius of system.belt ?? []) {
+    const points = []
+    for (let i = 0; i <= 256; i++) {
+      const a = (i / 256) * Math.PI * 2
+      points.push(new THREE.Vector3(Math.cos(a) * radius, -1, Math.sin(a) * radius))
+    }
+    const belt = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints(points),
+      new THREE.LineDashedMaterial({ color: 0x6e5a3c, dashSize: radius / 40, gapSize: radius / 60, transparent: true, depthWrite: false }),
+    )
+    belt.computeLineDistances()
+    scene.add(belt)
+    const el = document.createElement('div')
+    el.className = 'belt-name'
+    el.textContent = 'asteroid belt'
+    const label = new CSS2DObject(el)
+    label.position.set(0, 0, -radius)
+    label.center.set(0.5, 1.2)
+    scene.add(label)
+  }
 
   // --- Placing everything on a date -----------------------------------------
   let days = 0

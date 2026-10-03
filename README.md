@@ -9,13 +9,13 @@ facilities, trade prices and links.
 *Enter system* opens a view of the system itself: its stars, planets, moons
 and stations on their orbits, worked out as the game does, on any date from
 the day a new game starts, and played forwards at up to 1000 days a second.
-Behind them is the system's background as the game draws it in flight: a
-field of stars, thinned out in sparse systems, and patches of the system's
-haze.
+Asteroid belts are marked, and a wormhole says where it leads. Behind them is
+the system's background as the game draws it in flight: a field of stars,
+thinned out in sparse systems, and patches of the system's haze.
 
 A planet's outfitters and shipyards list what they sell, grouped as the game
-groups them. Click an item, or search for an outfit or ship, to see on the map
-everywhere it's sold.
+groups them, along with the ammunition every outfitter restocks. Click an item,
+or search for an outfit or ship, to see on the map everywhere it's sold.
 
 It reads the game's data straight from a check-out, so it can show any version
 of the game, including development branches. It isn't bound by the game's
@@ -112,6 +112,18 @@ and added.
   unit is one map unit, and the sizes and offsets of rings and links are taken
   from the game's `MapPanel.cpp`. The colours follow the game's map modes where
   it has an equivalent.
+
+### Tests
+
+```sh
+npm test
+```
+
+runs the tests of the data logic with Node's own test runner: the data-file
+parser, loading and merging definitions as the game does, sprite file names,
+orbits, sorting events into assumed ones and story choices, applying them, and
+comparing versions. They use small samples of game data written into the
+tests, so they need no check-out.
 
 ## Licence and credits
 
